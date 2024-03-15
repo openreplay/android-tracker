@@ -130,10 +130,13 @@ object NetworkManager {
             content // Use original content if compression fails
         }
 
+        val mediaType = "application/octet-stream".toMediaTypeOrNull()
+        val requestBody = compressedContent.toRequestBody(mediaType)
+
         val request = Request.Builder()
-            .url(INGEST_URL)
-            .post(compressedContent.toRequestBody("application/octet-stream".toMediaTypeOrNull()))
-            .addHeader("Authorization", "Bearer $token")
+            .url(baseUrl + INGEST_URL)
+            .post(requestBody)
+            .addHeader("Authorization", token)
             .addHeader("Content-Encoding", "gzip")
             .build()
 

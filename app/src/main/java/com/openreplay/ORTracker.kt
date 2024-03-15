@@ -56,8 +56,6 @@ class ORTracker private constructor(private val context: Context) {
         this.options = options
         this.projectKey = projectKey
 
-//        startSession(projectKey, options)
-
         val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
         val networkCallback = object : ConnectivityManager.NetworkCallback() {
