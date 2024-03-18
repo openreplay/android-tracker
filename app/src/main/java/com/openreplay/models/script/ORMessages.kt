@@ -2,8 +2,10 @@ package com.openreplay.models.script
 
 import com.openreplay.models.GenericMessage
 import com.openreplay.models.ORMessage
+import com.openreplay.models.script.ByteArrayUtils.fromValues
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
+import java.security.MessageDigest
 
 enum class ORMessageType(val id: ULong) {
     IOSMetadata(92u),
@@ -203,7 +205,7 @@ class ORIOSClickEvent(
     )
 
     override fun contentData(): ByteArray {
-        return ByteArrayUtils.fromValues(messageRaw, timestamp, ByteArrayUtils.fromValues(label, x, y))
+        return fromValues(messageRaw, timestamp, fromValues(label, x, y))
     }
 
     override fun toString(): String {
@@ -218,7 +220,7 @@ class ORIOSPerformanceEvent(
 ) : ORMessage(messageType) {
 
     override fun contentData(): ByteArray {
-        return ByteArrayUtils.fromValues(messageRaw, timestamp, ByteArrayUtils.fromValues(name, value))
+        return fromValues(messageRaw, timestamp, name, value)
     }
 
     override fun toString(): String {
@@ -256,55 +258,87 @@ class ByteArrayBuilder {
 }
 
 object ByteArrayUtils {
-    fun ByteArray.appendInt(value: Int, includeSizePrefix: Boolean = false): ByteArray {
-        val byteBuffer = ByteBuffer.allocate(Int.SIZE_BYTES)
-        byteBuffer.putInt(value)
-        return this + (if (includeSizePrefix) byteBuffer.array().size.toByte() else 0) + byteBuffer.array()
-    }
+//    private fun ByteArray.appendInt(value: Int, includeSizePrefix: Boolean = false): ByteArray {
+//        val byteBuffer = ByteBuffer.allocate(Int.SIZE_BYTES)
+//        byteBuffer.putInt(value)
+//        byteBuffer.flip() // Make the buffer ready for reading
+//        return this + (if (includeSizePrefix) ByteBuffer.allocate(4).putInt(value)
+//            .array().size.toByte() else 0) + byteBuffer.array()
+//    }
+//
+//    private fun ByteArray.appendLong(value: Long, includeSizePrefix: Boolean = false): ByteArray {
+//        val byteBuffer = ByteBuffer.allocate(Long.SIZE_BYTES)
+//        byteBuffer.putLong(value)
+//        byteBuffer.flip() // Make the buffer ready for reading
+//        return this + (if (includeSizePrefix) ByteBuffer.allocate(8).putLong(value)
+//            .array().size.toByte() else 0) + byteBuffer.array()
+//    }
+//
+//    private fun ByteArray.appendString(value: String, includeSizePrefix: Boolean = true): ByteArray {
+//        val stringBytes = value.toByteArray(Charsets.UTF_8)
+//        return this + (if (includeSizePrefix) ByteBuffer.allocate(4).putInt(stringBytes.size)
+//            .array() else byteArrayOf()) + stringBytes
+//    }
+//
+//    private fun ByteArray.appendFloat(value: Float): ByteArray {
+//        val byteBuffer = ByteBuffer.allocate(Float.SIZE_BYTES)
+//        byteBuffer.putFloat(value)
+//        byteBuffer.flip() // Make the buffer ready for reading
+//        return this + byteBuffer.array()
+//    }
+//
+//    private fun ByteArray.appendBoolean(value: Boolean): ByteArray {
+//        return this + (if (value) 1.toByte() else 0.toByte())
+//    }
 
-    fun ByteArray.appendLong(value: Long, includeSizePrefix: Boolean = false): ByteArray {
-        val byteBuffer = ByteBuffer.allocate(Long.SIZE_BYTES)
-        byteBuffer.putLong(value)
-        return this + (if (includeSizePrefix) byteBuffer.array().size.toByte() else 0) + byteBuffer.array()
-    }
-
-    fun ByteArray.appendString(value: String, includeSizePrefix: Boolean = true): ByteArray {
-        val stringBytes = value.toByteArray(Charsets.UTF_8)
-        return this + (if (includeSizePrefix) stringBytes.size.toByte() else 0) + stringBytes
-    }
-
-    fun ByteArray.appendFloat(value: Float): ByteArray {
-        val byteBuffer = ByteBuffer.allocate(Float.SIZE_BYTES)
-        byteBuffer.putFloat(value)
-        return this + byteBuffer.array()
-    }
-
-    fun ByteArray.appendBoolean(value: Boolean): ByteArray {
-        return this + (if (value) 1.toByte() else 0.toByte())
-    }
-
+//    fun fromValues(vararg values: Any?): ByteArray {
+//        var byteArray = byteArrayOf() // Start with an empty ByteArray
+//
+//        values.forEach { value ->
+//            when (value) {
+//                is ULong -> byteArray = byteArray.appendLong(value.toLong(), true)
+//                is UInt -> byteArray = byteArray.appendInt(value.toInt(), true)
+//                is Int -> byteArray = byteArray.appendInt(value, true)
+//                is UByte -> byteArray = byteArray.appendInt(value.toInt(), true)
+//                is Byte -> byteArray = byteArray.appendInt(value.toInt(), true)
+//                is Float -> byteArray = byteArray.appendFloat(value)
+//                is Boolean -> byteArray = byteArray.appendBoolean(value)
+//                is String -> byteArray = byteArray.appendString(value)
+//                is ByteArray -> byteArray += value
+//                else -> throw IllegalArgumentException("Unsupported type: ${value?.javaClass?.kotlin}")
+//            }
+//        }
+//        return byteArray
+//    }
 
     fun fromValues(vararg values: Any?): ByteArray {
-        val byteBuffer = ByteArrayOutputStream()
+        val outputStream = ByteArrayOutputStream()
         values.forEach { value ->
             when (value) {
-                null -> byteBuffer.write(0)
-                is Array<*> -> byteBuffer.write(fromValues(*value))
-                is ULong -> byteBuffer.write(ByteBuffer.allocate(8).putLong(value.toLong()).array())
-                is UInt -> byteBuffer.write(ByteBuffer.allocate(4).putInt(value.toInt()).array())
-                is Int -> byteBuffer.write(ByteBuffer.allocate(4).putInt(value).array())
-                is UByte -> byteBuffer.write(byteArrayOf(value.toByte()))
-                is Byte -> byteBuffer.write(byteArrayOf(value))
-                is Float -> byteBuffer.write(ByteBuffer.allocate(4).putFloat(value).array())
-                is Boolean -> byteBuffer.write(byteArrayOf(if (value) 1 else 0))
-                is String -> byteBuffer.write(value.toByteArray(Charsets.UTF_8))
-                is ByteArray -> byteBuffer.write(value)
-                else -> throw IllegalArgumentException("Unsupported type")
+                is Array<*> -> outputStream.write(fromValues(*value))
+                is ULong -> outputStream.write(ByteBuffer.allocate(8).putLong(value.toLong()).array())
+                is UInt -> outputStream.write(ByteBuffer.allocate(4).putInt(value.toInt()).array())
+                is Int -> outputStream.write(ByteBuffer.allocate(4).putInt(value).array())
+                is UByte, is Byte -> outputStream.write(byteArrayOf((value as Number).toByte()))
+                is Float -> outputStream.write(ByteBuffer.allocate(4).putFloat(value).array())
+                is Double -> outputStream.write(ByteBuffer.allocate(8).putDouble(value).array())
+                is Boolean -> outputStream.write(byteArrayOf(if (value) 1 else 0))
+                is String -> outputStream.write(value.toByteArray(Charsets.UTF_8))
+                is ByteArray -> outputStream.write(value)
+                // Handle encoding for custom types like UIEdgeInsets, CGRect, CGPoint, CGSize, UIColor
+                else -> throw IllegalArgumentException("Unsupported type: ${value!!::class.java}")
             }
         }
-        return byteBuffer.toByteArray()
+        return outputStream.toByteArray()
+    }
+
+    fun sha256(data: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hash = digest.digest(data)
+        return hash.joinToString("") { "%02x".format(it) }
     }
 }
+
 
 
 

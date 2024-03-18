@@ -40,6 +40,6 @@ class MainActivity : TrackingActivity() {
         navView.setupWithNavController(navController)
 
         val traker = ORTracker.getInstance(this)
-        traker.start("UILXBAOleQKLJssbgeSw", OROptions.defaults)
+        traker.start("34LtpOwyUI2ELFUNVkMn", OROptions.defaults)
     }
 }

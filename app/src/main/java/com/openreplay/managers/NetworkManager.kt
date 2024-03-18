@@ -21,7 +21,7 @@ object NetworkManager {
     private const val LATE_URL = "/v1/mobile/late"
     private const val IMAGES_URL = "/v1/mobile/images"
 
-    private var baseUrl = "https://api.openreplay.com/ingest"
+    private var baseUrl = "https://foss.openreplay.com/ingest"
     private var sessionId: String? = null
     private var token: String? = null
     private var writeToFile = false
@@ -92,49 +92,28 @@ object NetworkManager {
         })
     }
 
-//    fun sendMessage(content: ByteArray, completion: (Boolean) -> Unit) {
-//        if (writeToFile) {
-//            appendLocalFile(content)
-//            return
-//        }
-//        val token = "Bearer $token"
-//        val request = createRequest("POST", INGEST_URL, content.toRequestBody()).newBuilder()
-//            .addHeader("Authorization", token)
-//            .addHeader("Content-Encoding", "application/gzip")
-//            .build()
-//
-//        callAPI(request, onSuccess = { _ ->
-//            completion(true)
-//        }, onError = { _ ->
-//            completion(false)
-//        })
-//    }
-
     fun sendMessage(content: ByteArray, completion: (Boolean) -> Unit) {
         if (writeToFile) {
             appendLocalFile(content)
             return
         }
 
-        val token = getToken() // Assume this retrieves your token
+        val token = "Bearer $token"
 
         val compressedContent = try {
-            // Assume compressData() is your method to compress data, similar to GzipArchive.archive(data: content)
-            val oldSize = content.size
-            val compressed = compressData(content)
-            val newSize = compressed.size
-            DebugUtils.log("Compressed $oldSize bytes to $newSize bytes")
-            compressed
+            compressData(content).also { compressed ->
+                DebugUtils.log("Compressed ${content.size} bytes to ${compressed.size} bytes")
+            }
         } catch (e: Exception) {
             DebugUtils.log("Error with compression: ${e.message}")
-            content // Use original content if compression fails
+            content // Fallback to original content if compression fails
         }
 
         val mediaType = "application/octet-stream".toMediaTypeOrNull()
         val requestBody = compressedContent.toRequestBody(mediaType)
 
         val request = Request.Builder()
-            .url(baseUrl + INGEST_URL)
+            .url(baseUrl.trimEnd('/') + "/" + INGEST_URL.trimStart('/'))
             .post(requestBody)
             .addHeader("Authorization", token)
             .addHeader("Content-Encoding", "gzip")
@@ -147,11 +126,14 @@ object NetworkManager {
             }
 
             override fun onResponse(call: Call, response: Response) {
-                if (response.isSuccessful) {
-                    completion(true)
-                } else {
-                    DebugUtils.log("Network call failed: HTTP ${response.code}")
-                    completion(false)
+                response.use { // Ensure response body is closed to avoid leaks
+                    if (it.isSuccessful) {
+                        // DebugUtils.log("Network call successful with HTTP ${it.code} and ${it.body.contentLength()} bytes sent")
+                        completion(true)
+                    } else {
+                        DebugUtils.log("Network call failed: HTTP ${it.code}")
+                        completion(false)
+                    }
                 }
             }
         })
@@ -163,10 +145,6 @@ object NetworkManager {
             gzipOutputStream.write(data)
         }
         return byteArrayOutputStream.toByteArray()
-    }
-
-    private fun getToken(): String {
-        return "Bearer $token"
     }
 
     fun sendLateMessage(content: ByteArray, completion: (Boolean) -> Unit) {

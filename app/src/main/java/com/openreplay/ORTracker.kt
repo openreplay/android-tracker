@@ -98,14 +98,13 @@ class ORTracker private constructor(private val context: Context) {
     }
 
     private fun startSession(projectKey: String, options: OROptions) {
-        this.projectKey = projectKey
         SessionRequest.create(doNotRecord = false) { sessionResponse ->
             sessionResponse ?: return@create println("OpenReplay: no response from /start request")
             sessionStartTs = Date().time
-            val captureSettings = getCaptureSettings(
-                fps = 3,
-                quality = "high"
-            ) // Assuming com.openreplay.getCaptureSettings returns a Pair<Double, Double> or a similar structure for capture settings
+//            val captureSettings = getCaptureSettings(
+//                fps = 3,
+//                quality = "high"
+//            )
 
 //            ScreenshotManager.shared.setSettings(settings = captureSettings)
 //            val messageCollector = MessageCollector(context)

@@ -1,8 +1,6 @@
 package com.openreplay.managers
 
-import android.content.Context
 import android.os.Handler
-import android.os.Looper
 import com.openreplay.OpenReplay
 import com.openreplay.models.ORMessage
 import com.openreplay.models.script.ORIOSBatchMeta
@@ -59,23 +57,11 @@ object MessageCollector {
         cycleBuffer()
     }
 
-//    fun initialize(context: Context) {
-//        this.context = context.applicationContext
-//        lateMessagesFile = File(context.filesDir, "lateMessages.dat")
-//        // Additional initialization logic as needed
-//    }
-
 //    init {
-//        lateMessagesFile = File(context.filesDir, "lateMessages.dat")
-//        bufferRunnable = Runnable {
-//            cycleBuffer()
-//        }
-//
 //        startCycleBuffer()
 //    }
 
     private fun startCycleBuffer() {
-        // Initialize the handler if it hasn't been already
         if (bufferTimer == null) bufferTimer = Handler()
 
         bufferTimer?.postDelayed(bufferRunnable, 30_000L) // Schedule for 30 seconds
@@ -250,7 +236,7 @@ object MessageCollector {
         bufferTimer?.postDelayed(bufferRunnable, 30_000L)
     }
 
-    fun terminate() {
+    private fun terminate() {
         if (sendingLastMessages) return
 
         executorService.execute {
