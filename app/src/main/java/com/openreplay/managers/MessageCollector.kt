@@ -3,8 +3,8 @@ package com.openreplay.managers
 import android.os.Handler
 import com.openreplay.OpenReplay
 import com.openreplay.models.ORMessage
-import com.openreplay.models.script.ORIOSBatchMeta
-import com.openreplay.models.script.ORIOSNetworkCall
+import com.openreplay.models.script.ORMobileBatchMeta
+import com.openreplay.models.script.ORMobileNetworkCall
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
@@ -115,7 +115,7 @@ object MessageCollector {
         if (messages.isEmpty()) return
 
         val content = ByteArrayOutputStream()
-        val index = ORIOSBatchMeta(firstIndex = nextMessageIndex.toULong())
+        val index = ORMobileBatchMeta(nextMessageIndex.toULong())
         content.write(index.contentData())
         DebugUtils.log(index.toString())
         messages.forEach { message ->
@@ -172,7 +172,7 @@ object MessageCollector {
             if (!message.toString().contains("IOSLog") && !message.toString().contains("IOSNetworkCall")) {
                 DebugUtils.log(message.toString())
             }
-            (message as? ORIOSNetworkCall)?.let { networkCallMessage ->
+            (message as? ORMobileNetworkCall)?.let { networkCallMessage ->
                 DebugUtils.log("-->> IOSNetworkCall(105): ${networkCallMessage.method} ${networkCallMessage.URL}")
             }
         }

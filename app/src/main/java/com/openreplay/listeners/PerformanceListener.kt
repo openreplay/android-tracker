@@ -4,15 +4,14 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
-import android.os.Handler
 import androidx.lifecycle.*
 import com.openreplay.managers.MessageCollector
-import com.openreplay.models.script.ORIOSPerformanceEvent
 import java.util.Timer
 import java.util.TimerTask
 import android.os.Process
 import com.openreplay.OpenReplay
 import com.openreplay.managers.DebugUtils
+import com.openreplay.models.script.ORMobilePerformanceEvent
 import java.io.File
 
 class PerformanceListener private constructor(private val context: Context) : DefaultLifecycleObserver {
@@ -47,7 +46,7 @@ class PerformanceListener private constructor(private val context: Context) : De
             DebugUtils.log("Resume")
         }
 
-        MessageCollector.sendMessage(ORIOSPerformanceEvent(name = "background", value = 0u))
+        MessageCollector.sendMessage(ORMobilePerformanceEvent(name = "background", value = 0u))
 
         start()
     }
@@ -57,7 +56,7 @@ class PerformanceListener private constructor(private val context: Context) : De
         if (OpenReplay.options.debugLogs) {
             DebugUtils.log("Background")
         }
-        MessageCollector.sendMessage(ORIOSPerformanceEvent(name = "background", value = 1u))
+        MessageCollector.sendMessage(ORMobilePerformanceEvent(name = "background", value = 1u))
         stop()
     }
 
@@ -75,14 +74,14 @@ class PerformanceListener private constructor(private val context: Context) : De
     fun getCpuMessage() {
         val cpu = cpuUsage()
         if (cpu != null) {
-            val message = ORIOSPerformanceEvent(name = "mainThreadCPU", value = cpu.toULong())
+            val message = ORMobilePerformanceEvent(name = "mainThreadCPU", value = cpu.toULong())
             MessageCollector.sendMessage(message)
         }
     }
 
     fun getMemoryMessage() {
         val memory = memoryUsage()
-        val message = ORIOSPerformanceEvent(name = "memoryUsage", value = memory.toULong())
+        val message = ORMobilePerformanceEvent(name = "memoryUsage", value = memory.toULong())
         MessageCollector.sendMessage(message)
     }
 
@@ -120,12 +119,12 @@ class PerformanceListener private constructor(private val context: Context) : De
     }
 
     fun sendBattery() {
-        val message = ORIOSPerformanceEvent(name = "Battery", value = 20u)
+        val message = ORMobilePerformanceEvent(name = "Battery", value = 20u)
         MessageCollector.sendMessage(message)
     }
 
     fun sendThermalEvent() {
-        val message = ORIOSPerformanceEvent(name = "Thermal", value = 2u)
+        val message = ORMobilePerformanceEvent(name = "Thermal", value = 2u)
         MessageCollector.sendMessage(message)
     }
 

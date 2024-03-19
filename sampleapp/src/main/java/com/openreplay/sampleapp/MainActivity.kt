@@ -39,7 +39,7 @@ class MainActivity : TrackingActivity() {
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
 
-        val traker = ORTracker.getInstance(this)
-        traker.start("34LtpOwyUI2ELFUNVkMn", OROptions.defaults)
+        val tracker = ORTracker.getInstance(this)
+        tracker.start("34LtpOwyUI2ELFUNVkMn", OROptions.defaults)
     }
 }
