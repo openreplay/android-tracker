@@ -22,7 +22,7 @@ object NetworkManager {
     private const val IMAGES_URL = "/v1/mobile/images"
 
     private var baseUrl = "https://foss.openreplay.com/ingest"
-    private var sessionId: String? = null
+    var sessionId: String? = null
     private var token: String? = null
     private var writeToFile = false
 
@@ -201,6 +201,33 @@ object NetworkManager {
         callAPI(request, onSuccess = {
             completion(true)
             println(">>>>>> sending ${request.body?.contentLength()} bytes")
+        }, onError = {
+            completion(false)
+        })
+    }
+
+    fun sendImagesBatch(
+        gzData: ByteArray, archiveName: String, completion: (Boolean) -> Unit = {
+            println("Images batch sent: $it")
+        }
+    ) {
+        val token = this.token
+        if (token == null) {
+            completion(false)
+            return
+        }
+
+        val requestBody = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("batch", archiveName, gzData.toRequestBody("application/gzip".toMediaTypeOrNull()))
+            .build()
+
+        val request = createRequest("POST", IMAGES_URL, requestBody).newBuilder()
+            .addHeader("Authorization", "Bearer $token")
+            .build()
+
+        callAPI(request, onSuccess = {
+            completion(true)
         }, onError = {
             completion(false)
         })

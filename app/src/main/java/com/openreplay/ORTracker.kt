@@ -11,6 +11,7 @@ import java.util.*
 import kotlin.math.max
 import kotlin.math.min
 import com.openreplay.managers.MessageCollector
+import com.openreplay.managers.ScreenshotManager
 import com.openreplay.managers.UserDefaults
 import com.openreplay.models.script.ORMobileMetadata
 import com.openreplay.models.script.ORMobileUserID
@@ -21,6 +22,8 @@ enum class CheckState {
 }
 
 class ORTracker private constructor(private val context: Context) {
+    private var _context: Context? = null
+
     companion object {
         @Volatile
         private var instance: ORTracker? = null
@@ -54,7 +57,8 @@ class ORTracker private constructor(private val context: Context) {
         UserDefaults.init(context)
     }
 
-    fun start(projectKey: String, options: OROptions) {
+    fun start(context: Context, projectKey: String, options: OROptions) {
+        this._context = context
         this.options = options
         this.projectKey = projectKey
 
@@ -103,12 +107,12 @@ class ORTracker private constructor(private val context: Context) {
         SessionRequest.create(doNotRecord = false) { sessionResponse ->
             sessionResponse ?: return@create println("OpenReplay: no response from /start request")
             sessionStartTs = Date().time
-//            val captureSettings = getCaptureSettings(
-//                fps = 3,
-//                quality = "high"
-//            )
+            val captureSettings = getCaptureSettings(
+                fps = 3,
+                quality = "high"
+            )
 
-//            ScreenshotManager.shared.setSettings(settings = captureSettings)
+            ScreenshotManager.setSettings(settings = captureSettings)
 //            val messageCollector = MessageCollector(context)
 //            messageCollector.start()
             val lateMessagesFile = File(context.filesDir, "lateMessages.dat")
@@ -118,7 +122,7 @@ class ORTracker private constructor(private val context: Context) {
 //                if (logs) LogsListener.shared.start()
 //                if (crashes) Crashes.shared.start() // Assuming `Crashes` is a typo, and you meant `Crashes`
                 if (performances) PerformanceListener.getInstance(context).start()
-//                if (screen) ScreenshotManager.shared.start(startTs = sessionStartTs)
+                if (screen) ScreenshotManager.start(context = _context!!, startTs = sessionStartTs)
                 if (analytics) Analytics.start()
             }
         }
