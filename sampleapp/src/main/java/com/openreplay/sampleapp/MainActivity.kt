@@ -36,7 +36,7 @@ class MainActivity : TrackingActivity() {
         navView.setupWithNavController(navController)
 
         val tracker = ORTracker.getInstance(this)
-        tracker.start("34LtpOwyUI2ELFUNVkMn", OROptions.defaults)
+        tracker.start(this, "34LtpOwyUI2ELFUNVkMn", OROptions.defaults)
         tracker.setUserID("Shekar")
     }
 }
