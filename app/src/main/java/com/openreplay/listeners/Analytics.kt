@@ -12,7 +12,7 @@ import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.doAfterTextChanged
 import com.openreplay.managers.MessageCollector
-import com.openreplay.models.script.ORIOSClickEvent
+import com.openreplay.models.script.ORMobileClickEvent
 
 object Analytics {
     private var enabled: Boolean = false
@@ -24,7 +24,7 @@ object Analytics {
     fun sendClick(ev: MotionEvent) {
         if (!enabled) return
 
-        val message = ORIOSClickEvent(label = "Button", x = ev.x, y = ev.y)
+        val message = ORMobileClickEvent(label = "Button", x = ev.x, y = ev.y)
         MessageCollector.sendMessage(message)
     }
 

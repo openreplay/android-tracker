@@ -1,31 +1,29 @@
 package com.openreplay.models.script
 
-import com.openreplay.models.GenericMessage
 import com.openreplay.models.ORMessage
-import com.openreplay.models.script.ByteArrayUtils.fromValues
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
-import java.security.MessageDigest
+import kotlin.experimental.or
 
-enum class ORMessageType(val id: ULong) {
-    IOSMetadata(92u),
-    IOSEvent(93u),
-    IOSUserID(94u),
-    IOSUserAnonymousID(95u),
-    IOSScreenChanges(96u),
-    IOSCrash(97u),
-    IOSViewComponentEvent(98u),
-    IOSClickEvent(100u),
-    IOSInputEvent(101u),
-    IOSPerformanceEvent(102u),
-    IOSLog(103u),
-    IOSInternalError(104u),
-    IOSNetworkCall(105u),
-    IOSSwipeEvent(106u),
-    IOSBatchMeta(107u);
+enum class ORMessageType(val id: UByte) {
+    MobileMetadata(92u),
+    MobileEvent(93u),
+    MobileUserID(94u),
+    MobileUserAnonymousID(95u),
+    MobileScreenChanges(96u),
+    MobileCrash(97u),
+    MobileViewComponentEvent(98u),
+    MobileClickEvent(100u),
+    MobileInputEvent(101u),
+    MobilePerformanceEvent(102u),
+    MobileLog(103u),
+    MobileInternalError(104u),
+    MobileNetworkCall(105u),
+    MobileSwipeEvent(106u),
+    MobileBatchMeta(107u);
 
     companion object {
-        fun fromId(id: ULong): ORMessageType? = entries.find { it.id == id }
+        fun fromId(id: UByte): ORMessageType? = entries.find { it.id == id }
     }
 }
 
@@ -58,10 +56,17 @@ class DataReader(private val data: ByteArray) {
         return result
     }
 
+    fun readByte(): UByte {
+        if (offset >= data.size) {
+            throw IndexOutOfBoundsException("Offset is out of bounds")
+        }
+        val result = data[offset].toUByte()
+        offset += 1
+        return result
+    }
+
+
     fun readULong(): ULong {
-        // Placeholder for reading ULong from data at the current offset
-        // Update offset accordingly
-        // This is a simplified version; adjust for your data's format
         val result = data.copyOfRange(offset, offset + 8).fold(0uL) { acc, byte ->
             (acc shl 8) or byte.toULong()
         }
@@ -70,9 +75,6 @@ class DataReader(private val data: ByteArray) {
     }
 
     fun readFloat(): Float {
-        // Placeholder for reading ULong from data at the current offset
-        // Update offset accordingly
-        // This is a simplified version; adjust for your data's format
         val result = data.copyOfRange(offset, offset + 4).fold(0f) { acc, byte ->
             (acc * 256) + byte
         }
@@ -94,61 +96,35 @@ class DataReader(private val data: ByteArray) {
     }
 }
 
-class ORIOSMetadata(
+class ORMobileMetadata(
     val key: String,
     val value: String,
-    messageType: ORMessageType = ORMessageType.IOSMetadata
-) : ORMessage(messageType) {
-
-    companion object {
-        fun fromGenericMessage(genericMessage: GenericMessage): ORIOSMetadata? {
-            return try {
-                val dataReader = DataReader(genericMessage.body)
-                val key = dataReader.readString()
-                val value = dataReader.readString()
-                ORIOSMetadata(key, value)
-            } catch (e: Exception) {
-                null // Return null in case of any exceptions
-            }
-        }
-    }
+) : ORMessage(ORMessageType.MobileMetadata) {
 
     override fun contentData(): ByteArray {
-        return ByteArrayUtils.fromValues(messageRaw, timestamp, arrayOf(key, value))
+        return this.prefixData() + withSize(fromValues(key, value))
     }
 
     override fun toString(): String {
-        return "-->> IOSMetadata(92): timestamp: $timestamp key: $key value: $value"
-    }
-
-    private fun prependMetadata(typeId: ULong, timestamp: Long, data: ByteArray): ByteArray {
-        // Placeholder: prepend metadata to the data array
-        // Actual implementation depends on how you want to structure your binary data.
-        return byteArrayOf() // Implement based on your data format
+        return "-->> MobileMetadata(92): timestamp: $timestamp key: $key value: $value"
     }
 }
 
 
-class ORIOSBatchMeta(
+class ORMobileBatchMeta(
     val firstIndex: ULong,
-    messageType: ORMessageType = ORMessageType.IOSBatchMeta
-) : ORMessage(messageType) {
-
-    constructor(genericMessage: GenericMessage) : this(
-        firstIndex = DataReader(genericMessage.body).readULong()
-    )
+) : ORMessage(ORMessageType.MobileBatchMeta) {
 
     override fun contentData(): ByteArray {
-        return ByteArrayUtils.fromValues(messageRaw, timestamp, firstIndex)
+        return this.prefixData() + withSize(fromValues(firstIndex))
     }
 
     override fun toString(): String {
-        return "-->> IOSBatchMeta(107): timestamp: $timestamp firstIndex: $firstIndex"
+        return "-->> MobileBatchMeta(107): timestamp: $timestamp firstIndex: $firstIndex"
     }
 }
 
-
-class ORIOSNetworkCall(
+class ORMobileNetworkCall(
     val type: String,
     val method: String,
     val URL: String,
@@ -156,192 +132,86 @@ class ORIOSNetworkCall(
     val response: String,
     val status: ULong,
     val duration: ULong,
-    messageType: ORMessageType = ORMessageType.IOSNetworkCall
-) : ORMessage(messageType) {
-    companion object {
-        fun fromGenericMessage(genericMessage: GenericMessage): ORIOSNetworkCall? {
-            return try {
-                val dataReader = DataReader(genericMessage.body)
-                val type = dataReader.readString()
-                val method = dataReader.readString()
-                val URL = dataReader.readString()
-                val request = dataReader.readString()
-                val response = dataReader.readString()
-                val status = dataReader.readULong()
-                val duration = dataReader.readULong()
-
-                ORIOSNetworkCall(type, method, URL, request, response, status, duration)
-            } catch (e: Exception) {
-                null // Return null in case of any exceptions
-            }
-        }
-    }
+) : ORMessage(ORMessageType.MobileNetworkCall) {
 
     override fun contentData(): ByteArray {
-        return ByteArrayUtils.fromValues(
-            messageRaw,
-            timestamp,
-            arrayOf(type, method, URL, request, response, status, duration)
-        )
+        return this.prefixData() + withSize(fromValues(type, method, URL, request, response, status, duration))
     }
 
     override fun toString(): String {
-        return "-->> IOSNetworkCall(105): timestamp: $timestamp type: $type method: $method URL: $URL request: $request response: $response status: $status duration: $duration"
+        return "-->> MobileNetworkCall(105): timestamp: $timestamp type: $type method: $method URL: $URL request: $request response: $response status: $status duration: $duration"
     }
 }
 
-class ORIOSClickEvent(
+class ORMobileClickEvent(
     val label: String,
     val x: Float,
     val y: Float,
-    messageType: ORMessageType = ORMessageType.IOSClickEvent
-) : ORMessage(messageType) {
-
-    constructor(genericMessage: GenericMessage) : this(
-        label = DataReader(genericMessage.body).readString(),
-        x = DataReader(genericMessage.body).readFloat(),
-        y = DataReader(genericMessage.body).readFloat(),
-        messageType = ORMessageType.IOSClickEvent
-    )
+) : ORMessage(ORMessageType.MobileClickEvent) {
 
     override fun contentData(): ByteArray {
-        return fromValues(messageRaw, timestamp, fromValues(label, x, y))
+        return this.prefixData() + withSize(fromValues(label, x.toULong(), y.toULong()))
     }
 
     override fun toString(): String {
-        return "-->> IOSClickEvent(100): timestamp: $timestamp label: $label x: $x y: $y"
+        return "-->> MobileClickEvent(100): timestamp: $timestamp label: $label x: $x y: $y"
     }
 }
 
-class ORIOSPerformanceEvent(
+class ORMobilePerformanceEvent(
     val name: String,
     val value: ULong,
-    messageType: ORMessageType = ORMessageType.IOSPerformanceEvent
-) : ORMessage(messageType) {
+) : ORMessage(ORMessageType.MobilePerformanceEvent) {
 
     override fun contentData(): ByteArray {
-        return fromValues(messageRaw, timestamp, name, value)
+        return this.prefixData() + withSize(fromValues(name, value))
     }
 
     override fun toString(): String {
-        return "-->> IOSPerformanceEvent(102): timestamp: $timestamp name: $name value: $value"
+        return "-->> MobilePerformanceEvent(102): timestamp: $timestamp name: $name value: $value"
     }
 }
 
-class ByteArrayBuilder {
-    private val outputStream = ByteArrayOutputStream()
-
-    fun writeString(value: String) {
-        val stringBytes = value.toByteArray(Charsets.UTF_8)
-        writeInt(stringBytes.size) // Prefixed with length
-        outputStream.write(stringBytes)
+fun uLongToByteArray(value: ULong): ByteArray {
+    val uLongBytes = ByteArrayOutputStream()
+    var v = value
+    while (v >= 0x80u) {
+        uLongBytes.write(byteArrayOf((v.toByte() or 0x80.toByte())))
+        v = v shr 7
     }
-
-    fun writeFloat(value: Float) {
-        // Convert float to bytes and write to outputStream
-        val floatBytes = ByteBuffer.allocate(4).putFloat(value).array()
-        outputStream.write(floatBytes, 0, floatBytes.size)
-    }
-
-    fun writeInt(value: Int) {
-        // Convert int to bytes and write to outputStream
-        val intBytes = ByteBuffer.allocate(4).putInt(value).array()
-        outputStream.write(intBytes, 0, intBytes.size)
-    }
-
-    fun writeULong(value: ULong) {
-        val longBytes = ByteBuffer.allocate(8).putLong(value.toLong()).array()
-        outputStream.write(longBytes, 0, longBytes.size)
-    }
-
-    fun toByteArray(): ByteArray = outputStream.toByteArray()
+    uLongBytes.write(byteArrayOf(v.toByte()))
+    return uLongBytes.toByteArray()
 }
 
-object ByteArrayUtils {
-//    private fun ByteArray.appendInt(value: Int, includeSizePrefix: Boolean = false): ByteArray {
-//        val byteBuffer = ByteBuffer.allocate(Int.SIZE_BYTES)
-//        byteBuffer.putInt(value)
-//        byteBuffer.flip() // Make the buffer ready for reading
-//        return this + (if (includeSizePrefix) ByteBuffer.allocate(4).putInt(value)
-//            .array().size.toByte() else 0) + byteBuffer.array()
-//    }
-//
-//    private fun ByteArray.appendLong(value: Long, includeSizePrefix: Boolean = false): ByteArray {
-//        val byteBuffer = ByteBuffer.allocate(Long.SIZE_BYTES)
-//        byteBuffer.putLong(value)
-//        byteBuffer.flip() // Make the buffer ready for reading
-//        return this + (if (includeSizePrefix) ByteBuffer.allocate(8).putLong(value)
-//            .array().size.toByte() else 0) + byteBuffer.array()
-//    }
-//
-//    private fun ByteArray.appendString(value: String, includeSizePrefix: Boolean = true): ByteArray {
-//        val stringBytes = value.toByteArray(Charsets.UTF_8)
-//        return this + (if (includeSizePrefix) ByteBuffer.allocate(4).putInt(stringBytes.size)
-//            .array() else byteArrayOf()) + stringBytes
-//    }
-//
-//    private fun ByteArray.appendFloat(value: Float): ByteArray {
-//        val byteBuffer = ByteBuffer.allocate(Float.SIZE_BYTES)
-//        byteBuffer.putFloat(value)
-//        byteBuffer.flip() // Make the buffer ready for reading
-//        return this + byteBuffer.array()
-//    }
-//
-//    private fun ByteArray.appendBoolean(value: Boolean): ByteArray {
-//        return this + (if (value) 1.toByte() else 0.toByte())
-//    }
-
-//    fun fromValues(vararg values: Any?): ByteArray {
-//        var byteArray = byteArrayOf() // Start with an empty ByteArray
-//
-//        values.forEach { value ->
-//            when (value) {
-//                is ULong -> byteArray = byteArray.appendLong(value.toLong(), true)
-//                is UInt -> byteArray = byteArray.appendInt(value.toInt(), true)
-//                is Int -> byteArray = byteArray.appendInt(value, true)
-//                is UByte -> byteArray = byteArray.appendInt(value.toInt(), true)
-//                is Byte -> byteArray = byteArray.appendInt(value.toInt(), true)
-//                is Float -> byteArray = byteArray.appendFloat(value)
-//                is Boolean -> byteArray = byteArray.appendBoolean(value)
-//                is String -> byteArray = byteArray.appendString(value)
-//                is ByteArray -> byteArray += value
-//                else -> throw IllegalArgumentException("Unsupported type: ${value?.javaClass?.kotlin}")
-//            }
-//        }
-//        return byteArray
-//    }
-
-    fun fromValues(vararg values: Any?): ByteArray {
-        val outputStream = ByteArrayOutputStream()
-        values.forEach { value ->
-            when (value) {
-                is Array<*> -> outputStream.write(fromValues(*value))
-                is ULong -> outputStream.write(ByteBuffer.allocate(8).putLong(value.toLong()).array())
-                is UInt -> outputStream.write(ByteBuffer.allocate(4).putInt(value.toInt()).array())
-                is Int -> outputStream.write(ByteBuffer.allocate(4).putInt(value).array())
-                is UByte, is Byte -> outputStream.write(byteArrayOf((value as Number).toByte()))
-                is Float -> outputStream.write(ByteBuffer.allocate(4).putFloat(value).array())
-                is Double -> outputStream.write(ByteBuffer.allocate(8).putDouble(value).array())
-                is Boolean -> outputStream.write(byteArrayOf(if (value) 1 else 0))
-                is String -> outputStream.write(value.toByteArray(Charsets.UTF_8))
-                is ByteArray -> outputStream.write(value)
-                // Handle encoding for custom types like UIEdgeInsets, CGRect, CGPoint, CGSize, UIColor
-                else -> throw IllegalArgumentException("Unsupported type: ${value!!::class.java}")
+fun fromValues(vararg values: Any?): ByteArray {
+    val outputStream = ByteArrayOutputStream()
+    values.forEach { value ->
+        when (value) {
+            is Array<*> -> outputStream.write(fromValues(*value))
+            is ULong -> outputStream.write(uLongToByteArray(value))
+            is UInt -> outputStream.write(uLongToByteArray(value.toULong()))
+            is UByte -> outputStream.write(byteArrayOf(value.toByte()))
+            is Byte -> outputStream.write(byteArrayOf(value))
+            is Boolean -> outputStream.write(byteArrayOf(if (value) 1 else 0))
+            is String -> {
+                val stringBytes = value.toByteArray(Charsets.UTF_8)
+                outputStream.write(uLongToByteArray(stringBytes.size.toULong()))
+                outputStream.write(stringBytes)
             }
-        }
-        return outputStream.toByteArray()
-    }
+            is ByteArray -> outputStream.write(value)
 
-    fun sha256(data: ByteArray): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        val hash = digest.digest(data)
-        return hash.joinToString("") { "%02x".format(it) }
+            // TODO: review later
+            is Int -> outputStream.write(ByteBuffer.allocate(4).putInt(value).array())
+            is Float -> outputStream.write(ByteBuffer.allocate(4).putFloat(value).array())
+            is Double -> outputStream.write(ByteBuffer.allocate(8).putDouble(value).array())
+
+            // Handle encoding for custom types like UIEdgeInsets, CGRect, CGPoint, CGSize, UIColor
+            else -> throw IllegalArgumentException("Unsupported type: ${value!!::class.java}")
+        }
     }
+    return outputStream.toByteArray()
 }
 
-
-
-
-
-
-
+fun withSize(value: ByteArray): ByteArray {
+    return fromValues(value.size.toUInt()) + value
+}

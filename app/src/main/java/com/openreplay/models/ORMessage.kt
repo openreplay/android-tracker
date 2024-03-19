@@ -2,9 +2,10 @@ package com.openreplay.models
 
 import com.openreplay.models.script.DataReader
 import com.openreplay.models.script.ORMessageType
+import com.openreplay.models.script.fromValues
 
 data class GenericMessage(
-    val typeRaw: ULong,
+    val typeRaw: UByte,
     val type: ORMessageType?,
     val timestamp: ULong,
     val body: ByteArray
@@ -13,7 +14,7 @@ data class GenericMessage(
         fun fromData(data: ByteArray): GenericMessage? {
             return try {
                 val reader = DataReader.fromByteArray(data)
-                val typeRaw = reader.readULong()
+                val typeRaw = reader.readByte()
                 val type = ORMessageType.fromId(typeRaw)
                 val timestamp = reader.readULong()
                 val body = reader.readByteArray()
@@ -51,7 +52,7 @@ data class GenericMessage(
 
 
 open class ORMessage(
-    val messageRaw: ULong,
+    val messageRaw: UByte,
     val message: ORMessageType?,
     val timestamp: ULong
 ) {
@@ -69,6 +70,10 @@ open class ORMessage(
                 timestamp = genericMessage.timestamp
             )
         }
+    }
+
+    fun prefixData(): ByteArray {
+        return fromValues(messageRaw, timestamp)
     }
 
     open fun contentData(): ByteArray {
