@@ -3,6 +3,7 @@ package com.openreplay.managers
 import android.os.Handler
 import com.openreplay.OpenReplay
 import com.openreplay.models.ORMessage
+import com.openreplay.models.script.ByteArrayUtils
 import com.openreplay.models.script.ORMobileBatchMeta
 import com.openreplay.models.script.ORMobileNetworkCall
 import java.io.ByteArrayOutputStream
@@ -117,7 +118,7 @@ object MessageCollector {
         val content = ByteArrayOutputStream()
         val index = ORMobileBatchMeta(nextMessageIndex.toULong())
         content.write(index.contentData())
-        DebugUtils.log(index.toString())
+//        DebugUtils.log(index.toString())
         messages.forEach { message ->
             content.write(message)
         }

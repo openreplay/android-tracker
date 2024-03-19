@@ -4,15 +4,21 @@ import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.AttributeSet
+import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
 import android.widget.EditText
 import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.doAfterTextChanged
+import com.openreplay.managers.DebugUtils
 import com.openreplay.managers.MessageCollector
 import com.openreplay.models.script.ORMobileClickEvent
+import com.openreplay.models.script.ORMobileSwipeEvent
+import kotlin.math.abs
 
 object Analytics {
     private var enabled: Boolean = false
@@ -28,51 +34,99 @@ object Analytics {
         MessageCollector.sendMessage(message)
     }
 
+    fun sendSwipe(direction: String, velocityX: Float, velocityY: Float) {
+        if (!enabled) return
+
+        val message = ORMobileSwipeEvent(direction = direction, x = velocityX, y = velocityY, label = "Swipe")
+        MessageCollector.sendMessage(message)
+    }
+
     fun stop() {
         enabled = false
     }
 }
 
-class AppLifecycleTracker : Application.ActivityLifecycleCallbacks {
-    override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
-        // Track activity creation or view appearances
-        println("Activity created: ${activity.localClassName}")
+open class TrackingActivity : AppCompatActivity(), GestureDetector.OnGestureListener {
+    private lateinit var gestureDetector: GestureDetector
+    private var isScrolling = false
+    private val handler = Handler(Looper.getMainLooper())
+
+    // Variables to store the last known positions
+    private var lastX: Float = 0f
+    private var lastY: Float = 0f
+
+    private val endOfScrollRunnable = Runnable {
+        if (isScrolling) {
+            isScrolling = false
+            // Scroll has ended, send the event
+            Analytics.sendSwipe("ScrollEnd", lastX, lastY)
+        }
     }
 
-    override fun onActivityStarted(activity: Activity) {
-        TODO("Not yet implemented")
-    }
-
-    override fun onActivityResumed(activity: Activity) {
-        TODO("Not yet implemented")
-    }
-
-    override fun onActivityPaused(activity: Activity) {
-        TODO("Not yet implemented")
-    }
-
-    override fun onActivityStopped(activity: Activity) {
-        TODO("Not yet implemented")
-    }
-
-    override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {
-        TODO("Not yet implemented")
-    }
-
-    override fun onActivityDestroyed(activity: Activity) {
-        // Track activity destruction or view disappearances
-    }
-}
-
-open class TrackingActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Any global setup for onCreate lifecycle event
+        gestureDetector = GestureDetector(this, this)
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        Analytics.sendClick(ev)
+        gestureDetector.onTouchEvent(ev)
         return super.dispatchTouchEvent(ev)
+    }
+
+    override fun onDown(e: MotionEvent): Boolean {
+        Analytics.sendClick(e)
+        return true
+    }
+
+    override fun onShowPress(e: MotionEvent) {
+//        DebugUtils.log("Show press detected")
+    }
+
+    override fun onSingleTapUp(e: MotionEvent): Boolean {
+//        DebugUtils.log("Single tap detected")
+        return true
+    }
+
+    //override fun onScroll(e1: MotionEvent, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+    override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+        if (!isScrolling) {
+            isScrolling = true
+            // Scroll has started, you could also capture and send start position if needed
+            // Analytics.sendSwipe("ScrollStart", e2.x, e2.y)
+        }
+
+        // Update last known positions on every scroll update
+        lastX = e2.x
+        lastY = e2.y
+
+        // Remove any previous callbacks to reset the timer
+        handler.removeCallbacks(endOfScrollRunnable)
+        // Post a delayed runnable to catch end of scroll
+        handler.postDelayed(endOfScrollRunnable, 200) // Adjust delay as needed
+        return true
+    }
+
+    override fun onLongPress(e: MotionEvent) {
+        // DebugUtils.log("Long press detected")
+    }
+
+    override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+        val deltaX = e2.x - (e1?.x ?: 0f)
+        val deltaY = e2.y - (e1?.y ?: 0f)
+        if (abs(deltaX) > abs(deltaY)) {
+            if (deltaX > 0) {
+                Analytics.sendSwipe("right", velocityX, velocityY)
+            } else {
+                Analytics.sendSwipe("left", velocityX, velocityY)
+            }
+        } else {
+            if (deltaY > 0) {
+                Analytics.sendSwipe("down", velocityX, velocityY)
+            } else {
+                Analytics.sendSwipe("up", velocityX, velocityY)
+            }
+        }
+        return true
     }
 }
 
@@ -84,7 +138,7 @@ class TrackingFrameLayout(context: Context, attrs: AttributeSet?) : FrameLayout(
 }
 
 fun View.trackViewAppearances(screenName: String, viewName: String) {
-    // Setup tracking logic, potentially using OnAttachStateChangeListener
+    // Handle view appearance tracking
 }
 
 

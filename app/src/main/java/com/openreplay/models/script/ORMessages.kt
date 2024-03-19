@@ -1,5 +1,7 @@
 package com.openreplay.models.script
 
+import com.openreplay.managers.DebugUtils
+import com.openreplay.models.GenericMessage
 import com.openreplay.models.ORMessage
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
@@ -140,6 +142,39 @@ class ORMobileNetworkCall(
 
     override fun toString(): String {
         return "-->> MobileNetworkCall(105): timestamp: $timestamp type: $type method: $method URL: $URL request: $request response: $response status: $status duration: $duration"
+    }
+}
+
+class ORIOSUserID(
+    val iD: String,
+    messageType: ORMessageType = ORMessageType.MobileUserID
+) : ORMessage(messageType) {
+
+    override fun contentData(): ByteArray {
+//        return byte array of messageRaw, timestamp, iD
+//        return messageRaw.toString().toByteArray() + timestamp.toString().toByteArray() + iD.toByteArray(Charsets.UTF_8)
+        return fromValues(messageRaw, timestamp, iD)
+    }
+
+    override fun toString(): String {
+        return "-->> IOSUserID(94): timestamp: $timestamp userID: $iD"
+    }
+}
+
+class ORMobileSwipeEvent(
+    val label: String,
+    val direction: String,
+    val x: Float,
+    val y: Float,
+    messageType: ORMessageType = ORMessageType.MobileSwipeEvent
+) : ORMessage(messageType) {
+
+    override fun contentData(): ByteArray {
+        return fromValues(messageRaw, timestamp, arrayOf(label, direction, x, y))
+    }
+
+    override fun toString(): String {
+        return "-->> IOSSwipeEvent(106): label: $label timestamp: $timestamp direction: $direction velocityX: $x velocityY: $y"
     }
 }
 

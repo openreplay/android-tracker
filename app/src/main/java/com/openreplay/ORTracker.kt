@@ -12,6 +12,8 @@ import kotlin.math.max
 import kotlin.math.min
 import com.openreplay.managers.MessageCollector
 import com.openreplay.managers.UserDefaults
+import com.openreplay.models.script.ORIOSMetadata
+import com.openreplay.models.script.ORIOSUserID
 import java.io.File
 
 enum class CheckState {
@@ -89,7 +91,7 @@ class ORTracker private constructor(private val context: Context) {
 
                 // Handling tracker state
                 if (trackerState == CheckState.CAN_START) {
-                    startSession(projectKey, options)
+                    startSession(options)
                 }
             }
         }
@@ -97,7 +99,7 @@ class ORTracker private constructor(private val context: Context) {
         connectivityManager.registerDefaultNetworkCallback(networkCallback)
     }
 
-    private fun startSession(projectKey: String, options: OROptions) {
+    private fun startSession(options: OROptions) {
         SessionRequest.create(doNotRecord = false) { sessionResponse ->
             sessionResponse ?: return@create println("OpenReplay: no response from /start request")
             sessionStartTs = Date().time
@@ -134,6 +136,21 @@ class ORTracker private constructor(private val context: Context) {
         Analytics.stop()
         MessageCollector.stop()
         PerformanceListener.getInstance(context).stop()
+    }
+
+    fun setUserID(userID: String) {
+        val message = ORIOSUserID(iD = userID)
+        MessageCollector.sendMessage(message)
+    }
+
+    fun setMetadata(key: String, value: String) {
+        val message = ORIOSMetadata(key = key, value = value)
+        MessageCollector.sendMessage(message)
+    }
+
+    fun userAnonymousID(iD: String) {
+        val message = ORIOSUserID(iD = iD)
+        MessageCollector.sendMessage(message)
     }
 
     // Additional methods adapted from the Swift class...
