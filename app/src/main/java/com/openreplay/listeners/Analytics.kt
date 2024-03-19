@@ -1,8 +1,7 @@
 package com.openreplay.listeners
 
-import android.app.Activity
-import android.app.Application
 import android.content.Context
+import android.graphics.Rect
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -10,6 +9,7 @@ import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
@@ -55,6 +55,9 @@ open class TrackingActivity : AppCompatActivity(), GestureDetector.OnGestureList
     private var lastX: Float = 0f
     private var lastY: Float = 0f
 
+    private val rootView: View
+        get() = window.decorView.rootView
+
     private val endOfScrollRunnable = Runnable {
         if (isScrolling) {
             isScrolling = false
@@ -74,8 +77,23 @@ open class TrackingActivity : AppCompatActivity(), GestureDetector.OnGestureList
     }
 
     override fun onDown(e: MotionEvent): Boolean {
+//        val view = findViewAtPosition(rootView, e.x, e.y)  // TODO TBD what to capture here
         Analytics.sendClick(e)
         return true
+    }
+
+    private fun findViewAtPosition(view: View, x: Float, y: Float): View? {
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                val child = view.getChildAt(i)
+                val rect = Rect()
+                child.getGlobalVisibleRect(rect)
+                if (rect.contains(x.toInt(), y.toInt())) {
+                    return findViewAtPosition(child, x, y) ?: child
+                }
+            }
+        }
+        return null
     }
 
     override fun onShowPress(e: MotionEvent) {

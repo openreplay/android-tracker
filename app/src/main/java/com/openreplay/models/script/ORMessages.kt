@@ -1,7 +1,5 @@
 package com.openreplay.models.script
 
-import com.openreplay.managers.DebugUtils
-import com.openreplay.models.GenericMessage
 import com.openreplay.models.ORMessage
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
@@ -145,39 +143,6 @@ class ORMobileNetworkCall(
     }
 }
 
-class ORIOSUserID(
-    val iD: String,
-    messageType: ORMessageType = ORMessageType.MobileUserID
-) : ORMessage(messageType) {
-
-    override fun contentData(): ByteArray {
-//        return byte array of messageRaw, timestamp, iD
-//        return messageRaw.toString().toByteArray() + timestamp.toString().toByteArray() + iD.toByteArray(Charsets.UTF_8)
-        return fromValues(messageRaw, timestamp, iD)
-    }
-
-    override fun toString(): String {
-        return "-->> IOSUserID(94): timestamp: $timestamp userID: $iD"
-    }
-}
-
-class ORMobileSwipeEvent(
-    val label: String,
-    val direction: String,
-    val x: Float,
-    val y: Float,
-    messageType: ORMessageType = ORMessageType.MobileSwipeEvent
-) : ORMessage(messageType) {
-
-    override fun contentData(): ByteArray {
-        return fromValues(messageRaw, timestamp, arrayOf(label, direction, x, y))
-    }
-
-    override fun toString(): String {
-        return "-->> IOSSwipeEvent(106): label: $label timestamp: $timestamp direction: $direction velocityX: $x velocityY: $y"
-    }
-}
-
 class ORMobileClickEvent(
     val label: String,
     val x: Float,
@@ -233,6 +198,7 @@ fun fromValues(vararg values: Any?): ByteArray {
                 outputStream.write(uLongToByteArray(stringBytes.size.toULong()))
                 outputStream.write(stringBytes)
             }
+
             is ByteArray -> outputStream.write(value)
 
             // TODO: review later
@@ -250,3 +216,34 @@ fun fromValues(vararg values: Any?): ByteArray {
 fun withSize(value: ByteArray): ByteArray {
     return fromValues(value.size.toUInt()) + value
 }
+
+
+class ORMobileUserID(
+    val iD: String,
+) : ORMessage(ORMessageType.MobileUserID) {
+
+    override fun contentData(): ByteArray {
+        return this.prefixData() + withSize(fromValues(iD))
+    }
+
+    override fun toString(): String {
+        return "-->> IOSUserID(94): timestamp: $timestamp userID: $iD"
+    }
+}
+
+class ORMobileSwipeEvent(
+    val label: String,
+    val direction: String,
+    val x: Float,
+    val y: Float,
+) : ORMessage(ORMessageType.MobileSwipeEvent) {
+
+    override fun contentData(): ByteArray {
+        return this.prefixData() + withSize(fromValues(label, direction, x.toULong(), y.toULong()))
+    }
+
+    override fun toString(): String {
+        return "-->> IOSSwipeEvent(106): label: $label timestamp: $timestamp direction: $direction velocityX: $x velocityY: $y"
+    }
+}
+

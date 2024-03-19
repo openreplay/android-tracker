@@ -3,7 +3,6 @@ package com.openreplay.managers
 import android.os.Handler
 import com.openreplay.OpenReplay
 import com.openreplay.models.ORMessage
-import com.openreplay.models.script.ByteArrayUtils
 import com.openreplay.models.script.ORMobileBatchMeta
 import com.openreplay.models.script.ORMobileNetworkCall
 import java.io.ByteArrayOutputStream

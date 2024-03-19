@@ -12,8 +12,8 @@ import kotlin.math.max
 import kotlin.math.min
 import com.openreplay.managers.MessageCollector
 import com.openreplay.managers.UserDefaults
-import com.openreplay.models.script.ORIOSMetadata
-import com.openreplay.models.script.ORIOSUserID
+import com.openreplay.models.script.ORMobileMetadata
+import com.openreplay.models.script.ORMobileUserID
 import java.io.File
 
 enum class CheckState {
@@ -139,17 +139,17 @@ class ORTracker private constructor(private val context: Context) {
     }
 
     fun setUserID(userID: String) {
-        val message = ORIOSUserID(iD = userID)
+        val message = ORMobileUserID(iD = userID)
         MessageCollector.sendMessage(message)
     }
 
     fun setMetadata(key: String, value: String) {
-        val message = ORIOSMetadata(key = key, value = value)
+        val message = ORMobileMetadata(key = key, value = value)
         MessageCollector.sendMessage(message)
     }
 
     fun userAnonymousID(iD: String) {
-        val message = ORIOSUserID(iD = iD)
+        val message = ORMobileUserID(iD = iD)
         MessageCollector.sendMessage(message)
     }
 

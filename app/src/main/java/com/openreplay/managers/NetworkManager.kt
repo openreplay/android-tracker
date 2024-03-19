@@ -128,7 +128,7 @@ object NetworkManager {
             override fun onResponse(call: Call, response: Response) {
                 response.use { // Ensure response body is closed to avoid leaks
                     if (it.isSuccessful) {
-                         DebugUtils.log("Network call successful with HTTP ${it.code} and ${it.body.contentLength()} bytes sent")
+                        DebugUtils.log("Network call successful with HTTP ${it.code} and ${it.body.contentLength()} bytes sent")
                         completion(true)
                     } else {
                         DebugUtils.log("Network call failed: HTTP ${it.code}")

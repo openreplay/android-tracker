@@ -1,16 +1,12 @@
 package com.openreplay.sampleapp
 
-import android.os.Build
 import android.os.Bundle
-import androidx.annotation.RequiresApi
 import com.google.android.material.bottomnavigation.BottomNavigationView
-import androidx.appcompat.app.AppCompatActivity
 import androidx.navigation.findNavController
 import androidx.navigation.ui.AppBarConfiguration
 import androidx.navigation.ui.setupActionBarWithNavController
 import androidx.navigation.ui.setupWithNavController
 import com.openreplay.ORTracker
-import com.openreplay.listeners.AppLifecycleTracker
 import com.openreplay.listeners.TrackingActivity
 import com.openreplay.models.OROptions
 import com.openreplay.sampleapp.databinding.ActivityMainBinding
@@ -41,5 +37,6 @@ class MainActivity : TrackingActivity() {
 
         val tracker = ORTracker.getInstance(this)
         tracker.start("34LtpOwyUI2ELFUNVkMn", OROptions.defaults)
+        tracker.setUserID("Shekar")
     }
 }
