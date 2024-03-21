@@ -237,7 +237,7 @@ object NetworkManager {
         if (OpenReplay.options.debugLogs) { // Ensure Openreplay is adapted to your Kotlin implementation
             println("appendInFile ${data.size} bytes")
 
-            val filePath = "/Users/shekarsiri/Desktop/session.dat"
+            val filePath = "/Users/shekarsiri/Desktop/session.dat" // TODO fix this
             try {
                 File(filePath).apply {
                     // Create file and directories if they don't exist

@@ -8,11 +8,17 @@ import android.content.Context
 import android.graphics.*
 import android.view.View
 import com.openreplay.OpenReplay
+import com.openreplay.models.script.withSize
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
+import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.ByteBuffer
 import java.util.*
 import java.util.zip.GZIPOutputStream
 import kotlin.concurrent.fixedRateTimer
@@ -162,22 +168,35 @@ object ScreenshotManager {
         sendScreenshots()
     }
 
-    private suspend fun sendScreenshots() {
+    private fun sendScreenshots() {
         val sessionId = NetworkManager.sessionId ?: return
         val archiveName = "$sessionId-$lastTs.tar.gz"
-        val combinedData = ByteArrayOutputStream()
 
-        // Compress images into a single GZIP file (simplified)
-        withContext(Dispatchers.IO) {
-            GZIPOutputStream(combinedData).use { gzipOutputStream ->
-                screenshots.forEach { (imageData, _) ->
-                    gzipOutputStream.write(imageData)
+        GlobalScope.launch(Dispatchers.IO) {
+            val entries = mutableListOf<Pair<String, ByteArray>>()
+            val images = synchronized(screenshots) { ArrayList(screenshots) }
+            screenshots.clear()
+
+            images.forEach { (imageData, timestamp) ->
+                val filename = "${firstTs}_1_$timestamp.jpeg"
+                entries.add(filename to imageData)
+                lastTs = timestamp // Update lastTs to the timestamp of the last processed screenshot
+            }
+
+            val combinedData = ByteArrayOutputStream()
+            GzipCompressorOutputStream(combinedData).use { gzos ->
+                TarArchiveOutputStream(gzos).use { tarOs ->
+                    entries.forEach { (filename, imageData) ->
+                        val tarEntry = TarArchiveEntry(filename)
+                        tarEntry.size = imageData.size.toLong()
+                        tarOs.putArchiveEntry(tarEntry)
+                        ByteArrayInputStream(imageData).copyTo(tarOs)
+                        tarOs.closeArchiveEntry()
+                    }
                 }
             }
-        }
 
-        val gzData = combinedData.toByteArray()
-        withContext(Dispatchers.IO) {
+            val gzData = combinedData.toByteArray()
             try {
                 MessageCollector.sendImagesBatch(gzData, archiveName)
                 screenshots.clear()

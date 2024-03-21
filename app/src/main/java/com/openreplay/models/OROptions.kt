@@ -22,7 +22,7 @@ open class OROptions(
             analytics = true,
             performances = true,
             logs = true,
-            screen = false,
+            screen = true,
             wifiOnly = true,
             debugLogs = false,
             debugImages = false
