@@ -25,6 +25,22 @@ import com.openreplay.models.script.ORMobileSwipeEvent
 import kotlin.math.abs
 import kotlin.math.atan2
 
+enum class SwipeDirection {
+    LEFT, RIGHT, UP, DOWN, UNDEFINED;
+
+    companion object {
+        fun fromDistances(distanceX: Float, distanceY: Float): SwipeDirection {
+            return when {
+                distanceX > 0 -> LEFT
+                distanceX < 0 -> RIGHT
+                distanceY > 0 -> UP
+                distanceY < 0 -> DOWN
+                else -> UNDEFINED
+            }
+        }
+    }
+}
+
 object Analytics {
     private var enabled: Boolean = false
 
@@ -40,10 +56,10 @@ object Analytics {
         MessageCollector.sendMessage(message)
     }
 
-    fun sendSwipe(direction: String, x: Float, y: Float) {
+    fun sendSwipe(direction: SwipeDirection, x: Float, y: Float) {
         if (!enabled) return
 
-        val message = ORMobileSwipeEvent(direction = direction, x = x, y = y, label = "Swipe")
+        val message = ORMobileSwipeEvent(direction = direction.name.lowercase(), x = x, y = y, label = "Swipe")
         MessageCollector.sendMessage(message)
     }
 
@@ -59,7 +75,7 @@ open class TrackingActivity : AppCompatActivity() {
     private var isScrolling = false
     private var lastX: Float = 0f
     private var lastY: Float = 0f
-    private var swipeDirection: String = "Undefined"
+    private var swipeDirection: SwipeDirection = SwipeDirection.UNDEFINED
 
     private val rootView: View
         get() = window.decorView.rootView
@@ -93,18 +109,12 @@ open class TrackingActivity : AppCompatActivity() {
                     isScrolling = true
                 }
 
-                swipeDirection = when {
-                    distanceX > 0 -> "left"
-                    distanceX < 0 -> "right"
-                    distanceY > 0 -> "up"
-                    distanceY < 0 -> "down"
-                    else -> "Undefined"
-                }
+                swipeDirection = SwipeDirection.fromDistances(distanceX, distanceY)
                 lastX = e2.x
                 lastY = e2.y
 
                 handler.removeCallbacks(endOfScrollRunnable)
-                handler.postDelayed(endOfScrollRunnable, 200) // Adjust delay as needed
+                handler.postDelayed(endOfScrollRunnable, 200)
                 return true
             }
         })
@@ -114,6 +124,10 @@ open class TrackingActivity : AppCompatActivity() {
         gestureDetector.onTouchEvent(event)
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             touchStart = PointF(event.x, event.y)
+        }
+
+        if (event.actionMasked == MotionEvent.ACTION_UP) {
+            touchStart = null
         }
         return super.dispatchTouchEvent(event)
     }
@@ -141,18 +155,6 @@ open class TrackingActivity : AppCompatActivity() {
             is TextView -> view.text.toString()
             is Button -> view.text.toString()
             else -> view?.javaClass?.simpleName ?: "Unknown View"
-        }
-    }
-
-    private fun getSwipeDirection(start: MotionEvent, end: MotionEvent): String {
-        val deltaX = end.x - start.x
-        val deltaY = end.y - start.y
-        val angle = atan2(deltaY, deltaX) * (180 / Math.PI)
-        return when {
-            angle > 45 && angle <= 135 -> "up"
-            angle >= -135 && angle <= -45 -> "down"
-            angle < -135 || angle > 135 -> "left"
-            else -> "right"
         }
     }
 

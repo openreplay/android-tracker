@@ -28,15 +28,6 @@ enum class CheckState {
 class ORTracker private constructor(private val context: Context) {
     private var appContext: Context? = context
 
-//    companion object {
-//        @Volatile
-//        private var instance: ORTracker? = null
-//        fun getInstance(context: Context): ORTracker =
-//            instance ?: synchronized(this) {
-//                instance ?: ORTracker(context).also { instance = it }
-//            }
-//    }
-
     companion object {
         @Volatile
         private var instance: ORTracker? = null
