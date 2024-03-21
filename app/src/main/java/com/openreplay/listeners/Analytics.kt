@@ -1,6 +1,7 @@
 package com.openreplay.listeners
 
 import android.content.Context
+import android.graphics.PointF
 import android.graphics.Rect
 import android.os.Bundle
 import android.os.Handler
@@ -10,15 +11,19 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.doAfterTextChanged
-import com.openreplay.managers.DebugUtils
 import com.openreplay.managers.MessageCollector
+import com.openreplay.managers.ScreenshotManager
 import com.openreplay.models.script.ORMobileClickEvent
+import com.openreplay.models.script.ORMobileInputEvent
 import com.openreplay.models.script.ORMobileSwipeEvent
 import kotlin.math.abs
+import kotlin.math.atan2
 
 object Analytics {
     private var enabled: Boolean = false
@@ -27,17 +32,18 @@ object Analytics {
         enabled = true
     }
 
-    fun sendClick(ev: MotionEvent) {
+    fun sendClick(ev: MotionEvent, label: String? = null) {
         if (!enabled) return
 
-        val message = ORMobileClickEvent(label = "Button", x = ev.x, y = ev.y)
+
+        val message = ORMobileClickEvent(label = label ?: "Button", x = ev.x, y = ev.y)
         MessageCollector.sendMessage(message)
     }
 
-    fun sendSwipe(direction: String, velocityX: Float, velocityY: Float) {
+    fun sendSwipe(direction: String, x: Float, y: Float) {
         if (!enabled) return
 
-        val message = ORMobileSwipeEvent(direction = direction, x = velocityX, y = velocityY, label = "Swipe")
+        val message = ORMobileSwipeEvent(direction = direction, x = x, y = y, label = "Swipe")
         MessageCollector.sendMessage(message)
     }
 
@@ -46,105 +52,112 @@ object Analytics {
     }
 }
 
-open class TrackingActivity : AppCompatActivity(), GestureDetector.OnGestureListener {
+open class TrackingActivity : AppCompatActivity() {
     private lateinit var gestureDetector: GestureDetector
-    private var isScrolling = false
     private val handler = Handler(Looper.getMainLooper())
-
-    // Variables to store the last known positions
+    private var touchStart: PointF? = null
+    private var isScrolling = false
     private var lastX: Float = 0f
     private var lastY: Float = 0f
+    private var swipeDirection: String = "Undefined"
 
     private val rootView: View
         get() = window.decorView.rootView
 
+
     private val endOfScrollRunnable = Runnable {
         if (isScrolling) {
             isScrolling = false
-            // Scroll has ended, send the event
-            Analytics.sendSwipe("ScrollEnd", lastX, lastY)
+
+            Analytics.sendSwipe(swipeDirection, lastX, lastY)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        gestureDetector = GestureDetector(this, this)
+//        gestureDetector = GestureDetector(this, this)
+        gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
+                val clickedView = findViewAtPosition(rootView, e.x, e.y)
+                val description = getViewDescription(clickedView)
+                Analytics.sendClick(e, description)
+                return true
+            }
+
+            override fun onDown(e: MotionEvent): Boolean {
+                return true
+            }
+
+            override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+                if (!isScrolling) {
+                    isScrolling = true
+                }
+
+                swipeDirection = when {
+                    distanceX > 0 -> "left"
+                    distanceX < 0 -> "right"
+                    distanceY > 0 -> "up"
+                    distanceY < 0 -> "down"
+                    else -> "Undefined"
+                }
+                lastX = e2.x
+                lastY = e2.y
+
+                handler.removeCallbacks(endOfScrollRunnable)
+                handler.postDelayed(endOfScrollRunnable, 200) // Adjust delay as needed
+                return true
+            }
+        })
     }
 
-    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        gestureDetector.onTouchEvent(ev)
-        return super.dispatchTouchEvent(ev)
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        gestureDetector.onTouchEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            touchStart = PointF(event.x, event.y)
+        }
+        return super.dispatchTouchEvent(event)
     }
 
-    override fun onDown(e: MotionEvent): Boolean {
-//        val view = findViewAtPosition(rootView, e.x, e.y)  // TODO TBD what to capture here
-        Analytics.sendClick(e)
-        return true
-    }
-
-    private fun findViewAtPosition(view: View, x: Float, y: Float): View? {
-        if (view is ViewGroup) {
-            for (i in 0 until view.childCount) {
-                val child = view.getChildAt(i)
-                val rect = Rect()
-                child.getGlobalVisibleRect(rect)
+    private fun findViewAtPosition(root: View, x: Float, y: Float): View? {
+        if (!View::class.java.isInstance(root) || !root.isShown) return null
+        if (root is ViewGroup) {
+            for (i in root.childCount - 1 downTo 0) {
+                val child = root.getChildAt(i)
+                val location = IntArray(2)
+                child.getLocationOnScreen(location)
+                val rect = Rect(location[0], location[1], location[0] + child.width, location[1] + child.height)
                 if (rect.contains(x.toInt(), y.toInt())) {
-                    return findViewAtPosition(child, x, y) ?: child
+                    val foundView = findViewAtPosition(child, x, y)
+                    if (foundView != null) return foundView
                 }
             }
         }
-        return null
+        return root
     }
 
-    override fun onShowPress(e: MotionEvent) {
-//        DebugUtils.log("Show press detected")
-    }
-
-    override fun onSingleTapUp(e: MotionEvent): Boolean {
-//        DebugUtils.log("Single tap detected")
-        return true
-    }
-
-    //override fun onScroll(e1: MotionEvent, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
-    override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
-        if (!isScrolling) {
-            isScrolling = true
-            // Scroll has started, you could also capture and send start position if needed
-            // Analytics.sendSwipe("ScrollStart", e2.x, e2.y)
+    private fun getViewDescription(view: View?): String {
+        return when (view) {
+            is EditText -> view.text.toString()
+            is TextView -> view.text.toString()
+            is Button -> view.text.toString()
+            else -> view?.javaClass?.simpleName ?: "Unknown View"
         }
-
-        // Update last known positions on every scroll update
-        lastX = e2.x
-        lastY = e2.y
-
-        // Remove any previous callbacks to reset the timer
-        handler.removeCallbacks(endOfScrollRunnable)
-        // Post a delayed runnable to catch end of scroll
-        handler.postDelayed(endOfScrollRunnable, 200) // Adjust delay as needed
-        return true
     }
 
-    override fun onLongPress(e: MotionEvent) {
-        // DebugUtils.log("Long press detected")
-    }
-
-    override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
-        val deltaX = e2.x - (e1?.x ?: 0f)
-        val deltaY = e2.y - (e1?.y ?: 0f)
-        if (abs(deltaX) > abs(deltaY)) {
-            if (deltaX > 0) {
-                Analytics.sendSwipe("right", velocityX, velocityY)
-            } else {
-                Analytics.sendSwipe("left", velocityX, velocityY)
-            }
-        } else {
-            if (deltaY > 0) {
-                Analytics.sendSwipe("down", velocityX, velocityY)
-            } else {
-                Analytics.sendSwipe("up", velocityX, velocityY)
-            }
+    private fun getSwipeDirection(start: MotionEvent, end: MotionEvent): String {
+        val deltaX = end.x - start.x
+        val deltaY = end.y - start.y
+        val angle = atan2(deltaY, deltaX) * (180 / Math.PI)
+        return when {
+            angle > 45 && angle <= 135 -> "up"
+            angle >= -135 && angle <= -45 -> "down"
+            angle < -135 || angle > 135 -> "left"
+            else -> "right"
         }
-        return true
+    }
+
+    fun sanitizeView(view: View) {
+        ScreenshotManager.addSanitizedElement(view)
     }
 }
 
@@ -159,9 +172,13 @@ fun View.trackViewAppearances(screenName: String, viewName: String) {
     // Handle view appearance tracking
 }
 
-
 fun EditText.trackTextInput(label: String? = null, masked: Boolean = false) {
     this.doAfterTextChanged { text ->
-        // Handle text input tracking
+        val message = ORMobileInputEvent(label = label ?: "Input", value = text.toString(), valueMasked = masked)
+        MessageCollector.sendMessage(message)
     }
+}
+
+fun EditText.sanitize() {
+    ScreenshotManager.addSanitizedElement(this)
 }

@@ -7,6 +7,8 @@ import android.view.ViewGroup
 import android.widget.TextView
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
+import com.openreplay.listeners.sanitize
+import com.openreplay.listeners.trackTextInput
 import com.openreplay.sampleapp.databinding.FragmentHomeBinding
 
 class HomeFragment : Fragment() {
@@ -28,10 +30,21 @@ class HomeFragment : Fragment() {
         _binding = FragmentHomeBinding.inflate(inflater, container, false)
         val root: View = binding.root
 
-        val textView: TextView = binding.textHome
-        homeViewModel.text.observe(viewLifecycleOwner) {
-            textView.text = it
-        }
+        val usernameEditText = binding.username
+        val passwordEditText = binding.password
+        val loginButton = binding.login
+
+        passwordEditText.trackTextInput("password", true)
+
+        usernameEditText.trackTextInput("username")
+        usernameEditText.sanitize()
+
+
+
+//        val textView: TextView = binding.textHome
+//        homeViewModel.text.observe(viewLifecycleOwner) {
+//            textView.text = it
+//        }
         return root
     }
 

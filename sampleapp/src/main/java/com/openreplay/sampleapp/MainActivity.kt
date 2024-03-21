@@ -12,7 +12,6 @@ import com.openreplay.models.OROptions
 import com.openreplay.sampleapp.databinding.ActivityMainBinding
 
 class MainActivity : TrackingActivity() {
-
     private lateinit var binding: ActivityMainBinding
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -25,8 +24,6 @@ class MainActivity : TrackingActivity() {
         val navView: BottomNavigationView = binding.navView
 
         val navController = findNavController(R.id.nav_host_fragment_activity_main)
-        // Passing each menu ID as a set of Ids because each
-        // menu should be considered as top level destinations.
         val appBarConfiguration = AppBarConfiguration(
             setOf(
                 R.id.navigation_home, R.id.navigation_dashboard, R.id.navigation_notifications
@@ -35,8 +32,17 @@ class MainActivity : TrackingActivity() {
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
 
+
         val tracker = ORTracker.getInstance(this)
-        tracker.start(this, "34LtpOwyUI2ELFUNVkMn", OROptions.defaults)
+        tracker.start("34LtpOwyUI2ELFUNVkMn", OROptions.defaults)
         tracker.setUserID("Shekar")
+        tracker.setMetadata("plan", "free")
+
+        data class User(val id: Int, val name: String, val email: String)
+
+        val user = User(id = 1, name = "John Doe", email = "john.doe@example.com")
+        tracker.event("userCreated", user)
+
+        tracker.sanitizeView(navView)
     }
 }

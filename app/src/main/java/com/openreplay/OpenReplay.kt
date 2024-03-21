@@ -1,5 +1,7 @@
 package com.openreplay
 
+import android.view.View
+
 object OpenReplay {
     var options: Options = Options()
 

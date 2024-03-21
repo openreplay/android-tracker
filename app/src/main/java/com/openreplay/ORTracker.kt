@@ -4,7 +4,10 @@ import PerformanceListener
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.view.View
+import com.google.gson.Gson
 import com.openreplay.listeners.Analytics
+import com.openreplay.listeners.LogsListener
 import com.openreplay.models.OROptions
 import com.openreplay.models.SessionRequest
 import java.util.*
@@ -13,6 +16,7 @@ import kotlin.math.min
 import com.openreplay.managers.MessageCollector
 import com.openreplay.managers.ScreenshotManager
 import com.openreplay.managers.UserDefaults
+import com.openreplay.models.script.ORMobileEvent
 import com.openreplay.models.script.ORMobileMetadata
 import com.openreplay.models.script.ORMobileUserID
 import java.io.File
@@ -22,43 +26,55 @@ enum class CheckState {
 }
 
 class ORTracker private constructor(private val context: Context) {
-    private var _context: Context? = null
+    private var appContext: Context? = context
+
+//    companion object {
+//        @Volatile
+//        private var instance: ORTracker? = null
+//        fun getInstance(context: Context): ORTracker =
+//            instance ?: synchronized(this) {
+//                instance ?: ORTracker(context).also { instance = it }
+//            }
+//    }
 
     companion object {
         @Volatile
         private var instance: ORTracker? = null
-        fun getInstance(context: Context): ORTracker =
-            instance ?: synchronized(this) {
-                instance ?: ORTracker(context.applicationContext).also { instance = it }
+
+        fun getInstance(context: Context): ORTracker {
+            return instance ?: synchronized(this) {
+                instance ?: ORTracker(context).also {
+                    instance = it
+                }
             }
+        }
     }
 
     //    private val userDefaults: SharedPreferences =
 //        context.getSharedPreferences("io.asayer.AsayerSDK-defaults", Context.MODE_PRIVATE)
     private var projectKey: String? = null
-
-    //    var pkgVersion = "1.1.10"
     private var sessionStartTs: Long = 0
     var trackerState = CheckState.UNCHECKED
-
-    //    private var networkCheckTimer: Timer? = null
-//    var bufferingMode = false
-//    var serverURL: String
-//        get() = NetworkManager.baseUrl
-//        set(value) {
-//            NetworkManager.baseUrl = value
-//        }
     private var options: OROptions = OROptions.defaults
-//    private var networkCheckHandler: Handler? = null
-//    private var networkCheckRunnable: Runnable? = null
 
     init {
         // Android-specific network monitoring setup goes here
         UserDefaults.init(context)
     }
 
-    fun start(context: Context, projectKey: String, options: OROptions) {
-        this._context = context
+
+    fun event(name: String, `object`: Any?) {
+        val gson = Gson()
+        val jsonPayload = `object`?.let { gson.toJson(it) } ?: ""
+        event(name, jsonPayload)
+    }
+
+    fun event(name: String, jsonPayload: String) {
+        val message = ORMobileEvent(name, payload = jsonPayload)
+        MessageCollector.sendMessage(message)
+    }
+
+    fun start(projectKey: String, options: OROptions) {
         this.options = options
         this.projectKey = projectKey
 
@@ -113,16 +129,14 @@ class ORTracker private constructor(private val context: Context) {
             )
 
             ScreenshotManager.setSettings(settings = captureSettings)
-//            val messageCollector = MessageCollector(context)
-//            messageCollector.start()
             val lateMessagesFile = File(context.filesDir, "lateMessages.dat")
             MessageCollector.start(lateMessagesFile)
 
             with(options) {
-//                if (logs) LogsListener.shared.start()
-//                if (crashes) Crashes.shared.start() // Assuming `Crashes` is a typo, and you meant `Crashes`
+                if (logs) LogsListener.start()
+//                if (crashes) Crashes.shared.start()
                 if (performances) PerformanceListener.getInstance(context).start()
-                if (screen) ScreenshotManager.start(context = _context!!, startTs = sessionStartTs)
+                if (screen) ScreenshotManager.start(context = appContext!!, startTs = sessionStartTs)
                 if (analytics) Analytics.start()
             }
         }
@@ -157,7 +171,13 @@ class ORTracker private constructor(private val context: Context) {
         MessageCollector.sendMessage(message)
     }
 
-    // Additional methods adapted from the Swift class...
+    fun addIgnoredView(view: View) { // TODO - check to use this or sanitizeView
+        ScreenshotManager.addSanitizedElement(view)
+    }
+
+    fun sanitizeView(view: View) {
+        ScreenshotManager.addSanitizedElement(view)
+    }
 }
 
 fun getCaptureSettings(fps: Int, quality: String): Pair<Double, Double> {

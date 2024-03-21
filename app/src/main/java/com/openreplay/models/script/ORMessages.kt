@@ -96,6 +96,21 @@ class DataReader(private val data: ByteArray) {
     }
 }
 
+class ORMobileInputEvent(
+    val label: String,
+    val value: String,
+    val valueMasked: Boolean,
+) : ORMessage(ORMessageType.MobileInputEvent) {
+
+    override fun contentData(): ByteArray {
+        return this.prefixData() + withSize(fromValues(value, valueMasked, label))
+    }
+
+    override fun toString(): String {
+        return "-->> MobileInputEvent(101): timestamp: $timestamp label: $label value: $value"
+    }
+}
+
 class ORMobileMetadata(
     val key: String,
     val value: String,
@@ -110,6 +125,19 @@ class ORMobileMetadata(
     }
 }
 
+class ORMobileLog(
+    val severity: String,
+    val content: String,
+) : ORMessage(ORMessageType.MobileLog) {
+
+    override fun contentData(): ByteArray {
+        return this.prefixData() + withSize(fromValues(severity, content))
+    }
+
+    override fun toString(): String {
+        return "-->> MobileLog(103): timestamp: $timestamp severity: $severity message: $content"
+    }
+}
 
 class ORMobileBatchMeta(
     val firstIndex: ULong,
@@ -243,7 +271,21 @@ class ORMobileSwipeEvent(
     }
 
     override fun toString(): String {
-        return "-->> IOSSwipeEvent(106): label: $label timestamp: $timestamp direction: $direction velocityX: $x velocityY: $y"
+        return "-->> MobileSwipeEvent(106): label: $label timestamp: $timestamp direction: $direction velocityX: $x velocityY: $y"
     }
 }
 
+
+class ORMobileEvent(
+    val name: String,
+    val payload: String,
+) : ORMessage(ORMessageType.MobileEvent) {
+
+    override fun contentData(): ByteArray {
+        return this.prefixData() + withSize(fromValues(name, payload))
+    }
+
+    override fun toString(): String {
+        return "-->> MobileEvent(93): timestamp: $timestamp name: $name payload: $payload"
+    }
+}

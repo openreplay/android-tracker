@@ -117,7 +117,6 @@ object MessageCollector {
         val content = ByteArrayOutputStream()
         val index = ORMobileBatchMeta(nextMessageIndex.toULong())
         content.write(index.contentData())
-//        DebugUtils.log(index.toString())
         messages.forEach { message ->
             content.write(message)
         }
@@ -242,6 +241,13 @@ object MessageCollector {
         executorService.execute {
             sendingLastMessages = true
             flushMessages()
+        }
+    }
+
+    fun sendImagesBatch(batch: ByteArray, fileName: String) {
+        imagesWaiting.add(BatchArch(name = fileName, data = batch))
+        executorService.execute {
+            flushImages()
         }
     }
 }

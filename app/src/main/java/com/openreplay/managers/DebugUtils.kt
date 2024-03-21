@@ -8,8 +8,8 @@ object DebugUtils {
     }
 
     fun log(str: String) {
-        if (OpenReplay.options.debugLogs) {
-            println(str)
-        }
+//        if (OpenReplay.options.debugLogs) {
+//            println(str)
+//        }
     }
 }

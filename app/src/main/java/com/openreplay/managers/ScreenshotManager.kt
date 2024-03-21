@@ -5,8 +5,7 @@ import kotlinx.coroutines.launch
 import NetworkManager
 import android.app.Activity
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Canvas
+import android.graphics.*
 import android.view.View
 import com.openreplay.OpenReplay
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +26,7 @@ object ScreenshotManager {
     private var firstTs: Long = 0
     private var bufferTimer: Timer? = null
     private lateinit var appContext: Context
+    private var sanitizedElements: MutableList<View> = mutableListOf()
 
     fun setSettings(settings: Pair<Double, Double>) {
         // Set up the screenshot manager
@@ -47,33 +47,76 @@ object ScreenshotManager {
         }
     }
 
-    // Placeholder for stopping the screenshot capture process
     private fun stopCapturing() {
         timer?.cancel()
         timer = null
     }
 
-    // Simplified screenshot capturing (for the current app only)
     private fun captureScreenshot() {
-        // Assuming this function is called within an Activity context
         val view = (this.appContext as Activity).window.decorView.rootView
 
-        // Make sure to call this on the UI thread
         (this.appContext as Activity).runOnUiThread {
-            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bitmap)
-            view.draw(canvas)
-
+            val bitmap = viewToBitmap(view, view.width, view.height)
             compressAndSend(bitmap)
         }
     }
 
+    private val maskPaint = Paint().apply {
+        style = Paint.Style.FILL
+        val patternBitmap = createCrossStripedPatternBitmap()
+        shader = BitmapShader(patternBitmap, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
+    }
 
     private fun viewToBitmap(view: View, width: Int, height: Int): Bitmap {
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         view.draw(canvas)
+
+
+        // Draw masks over sanitized elements
+        sanitizedElements.forEach { sanitizedView ->
+            if (sanitizedView.visibility == View.VISIBLE) {
+                val location = IntArray(2)
+                sanitizedView.getLocationInWindow(location)
+                val rootViewLocation = IntArray(2)
+                view.getLocationInWindow(rootViewLocation)
+                val x = location[0] - rootViewLocation[0]
+                val y = location[1] - rootViewLocation[1]
+
+                // Draw the striped mask over the sanitized view
+                canvas.save()
+                canvas.translate(x.toFloat(), y.toFloat())
+                canvas.drawRect(0f, 0f, sanitizedView.width.toFloat(), sanitizedView.height.toFloat(), maskPaint)
+                canvas.restore()
+            }
+        }
         return bitmap
+    }
+
+    private fun createCrossStripedPatternBitmap(): Bitmap {
+        val patternSize = 80 // This is the size of the square pattern
+        val patternBitmap = Bitmap.createBitmap(patternSize, patternSize, Bitmap.Config.ARGB_8888)
+        val patternCanvas = Canvas(patternBitmap)
+        val paint = Paint().apply {
+            color = Color.DKGRAY // Color of the stripes
+            style = Paint.Style.FILL
+        }
+
+        patternCanvas.drawColor(Color.WHITE)
+
+        val stripeWidth = 20f // Width of the stripes
+        val gap = stripeWidth / 4 // Gap between stripes
+        for (i in -patternSize until patternSize * 2 step (stripeWidth + gap).toInt()) {
+            patternCanvas.drawLine(i.toFloat(), -gap, i.toFloat() + patternSize, patternSize.toFloat() + gap, paint)
+        }
+
+        patternCanvas.rotate(90f, patternSize / 2f, patternSize / 2f)
+
+        for (i in -patternSize until patternSize * 2 step (stripeWidth + gap).toInt()) {
+            patternCanvas.drawLine(i.toFloat(), -gap, i.toFloat() + patternSize, patternSize.toFloat() + gap, paint)
+        }
+
+        return patternBitmap
     }
 
     private fun gzipCompress(data: ByteArray): ByteArray {
@@ -102,10 +145,6 @@ object ScreenshotManager {
         FileOutputStream(file).use { out ->
             out.write(imageData)
         }
-    }
-
-    private fun sendScreenshotData(data: ByteArray) {
-        // Implementation depends on your backend and network library
     }
 
     suspend fun syncBuffers() {
@@ -138,14 +177,12 @@ object ScreenshotManager {
         }
 
         val gzData = combinedData.toByteArray()
-
-        // Assuming sendImagesBatch is a suspend function that sends the compressed data
         withContext(Dispatchers.IO) {
             try {
-                NetworkManager.sendImagesBatch(gzData, archiveName)
+                MessageCollector.sendImagesBatch(gzData, archiveName)
                 screenshots.clear()
             } catch (e: Exception) {
-                e.printStackTrace() // Handle error appropriately
+                e.printStackTrace()
             }
         }
     }
@@ -172,8 +209,18 @@ object ScreenshotManager {
         }
         // Note: This code runs on a background thread, ensure any UI updates are posted to the main thread
     }
-}
 
-//private fun <E> MutableList<E>.add(element: ByteArray): Boolean {
-//    return add(element)
-//}
+    fun addSanitizedElement(view: View) {
+        if (OpenReplay.options.debugLogs) {
+            DebugUtils.log("Sanitizing view: $view")
+        }
+        sanitizedElements.add(view)
+    }
+
+    fun removeSanitizedElement(view: View) {
+        if (OpenReplay.options.debugLogs) {
+            DebugUtils.log("Removing sanitized view: $view")
+        }
+        sanitizedElements.remove(view)
+    }
+}
