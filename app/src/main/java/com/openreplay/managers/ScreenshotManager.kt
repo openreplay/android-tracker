@@ -39,7 +39,7 @@ object ScreenshotManager {
     fun start(context: Context, startTs: Long) {
         this.appContext = context
         firstTs = startTs
-        startCapturing(500)
+        startCapturing(200)
         startCycleBuffer()
     }
 
@@ -136,7 +136,7 @@ object ScreenshotManager {
 
     private fun compressAndSend(bitmap: Bitmap) = GlobalScope.launch {
         ByteArrayOutputStream().use { outputStream ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 50, outputStream)
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 10, outputStream)
             val screenshotData = outputStream.toByteArray()
 
             saveToLocalFilesystem(appContext, screenshotData, "screenshot-${System.currentTimeMillis()}.jpg")
