@@ -9,7 +9,7 @@ object OpenReplay {
         val debugLogs: Boolean = true,
         val pkgVersion: String = "1.0.10",
         val projectKey: String = "34LtpOwyUI2ELFUNVkMn",
-        val bufferingMode: Boolean = false,
+        val bufferingMode: Boolean = true,
         var sessionStartTs: Long = 0,
     )
 

@@ -1,35 +1,45 @@
 package com.openreplay.models
 
-import android.os.Build
-import android.os.SystemClock
+import android.content.Context
+import android.os.*
+import android.util.DisplayMetrics
+import android.view.WindowManager
 import com.openreplay.OpenReplay
 import java.util.Date
 import java.io.Serializable
-import android.os.Handler
-import android.os.Looper
 import com.openreplay.managers.DebugUtils
 import com.openreplay.managers.UserDefaults
 import kotlin.math.abs
+import kotlin.math.sqrt
 
 object SessionRequest {
     private var params = mutableMapOf<String, Any>()
 
-    fun create(doNotRecord: Boolean, completion: (SessionResponse?) -> Unit) {
+    fun create(context: Context, doNotRecord: Boolean, completion: (SessionResponse?) -> Unit) {
         val projectKey = OpenReplay.options.projectKey
+//        val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+//        val batteryLevel = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+//        val batteryStatus = batteryManager.getIntProperty(BatteryManager.BATTERY_STATUS_UNKNOWN)
+        val resolution = getDeviceResolution(context)
 
-        val performances = mapOf(
-            "physicalMemory" to Runtime.getRuntime().maxMemory(),
-            "processorCount" to Runtime.getRuntime().availableProcessors().toLong(),
-            "systemUptime" to SystemClock.uptimeMillis(),
-            "isLowPowerModeEnabled" to 1L,
-            "batteryState" to 1L,
-            "orientation" to 0L
-        )
+//        val performances = mapOf(
+//            "physicalMemory" to Runtime.getRuntime().maxMemory(),
+//            "processorCount" to Runtime.getRuntime().availableProcessors().toLong(),
+//            "systemUptime" to SystemClock.uptimeMillis(),
+//            "isLowPowerModeEnabled" to 0L,
+//            "batteryLevel" to batteryLevel,
+//            "batteryState" to batteryStatus,
+//            "orientation" to context.resources.configuration.orientation,
+//        )
 
-        val deviceName = Build.MODEL ?: "Unknown"
+//        val deviceName = Build.MODEL ?: "Unknown"
         val deviceModel = Build.DEVICE ?: "Unknown"
+        val deviceType = if (isTablet(context)) "tablet" else "mobile"
 
         params = mutableMapOf(
+            "platform" to "android",
+            "width" to resolution.first,
+            "height" to resolution.second,
             "doNotRecord" to doNotRecord,
             "projectKey" to projectKey,
             "trackerVersion" to OpenReplay.options.pkgVersion, // Assuming OpenReplay.options.pkgVersion is not needed or is the same
@@ -37,14 +47,45 @@ object SessionRequest {
             "userUUID" to UserDefaults.userUUID, // Replace with dynamic retrieval
             "userOSVersion" to Build.VERSION.RELEASE,
             "userDevice" to deviceModel,
-            "userDeviceType" to deviceName,
+            "userDeviceType" to deviceType,
             "timestamp" to Date().time,
-            "performances" to performances,
             "deviceMemory" to Runtime.getRuntime().maxMemory() / 1024,
             "timezone" to getTimezone()
         )
         callAPI(completion)
     }
+
+    private fun getDeviceResolution(context: Context): Pair<Int, Int> {
+        val metrics = DisplayMetrics()
+        val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // For Android R and above
+            val windowMetrics = windowManager.currentWindowMetrics
+            val bounds = windowMetrics.bounds
+            val width = bounds.width()
+            val height = bounds.height()
+            return Pair(width, height)
+        } else {
+            // For older versions
+            @Suppress("DEPRECATION")
+            val display = windowManager.defaultDisplay
+            @Suppress("DEPRECATION")
+            display.getMetrics(metrics)
+            val width = metrics.widthPixels
+            val height = metrics.heightPixels
+            return Pair(width, height)
+        }
+    }
+
+    fun isTablet(context: Context): Boolean {
+        val displayMetrics = context.resources.displayMetrics
+        val widthDp = displayMetrics.widthPixels / displayMetrics.density
+        val heightDp = displayMetrics.heightPixels / displayMetrics.density
+        val screenDiagonalDp = sqrt((widthDp * widthDp + heightDp * heightDp).toDouble()).toInt()
+        return screenDiagonalDp >= 600 // Threshold for considering a device as a tablet
+    }
+
 
     private fun callAPI(completion: (SessionResponse?) -> Unit) {
         if (params.isEmpty()) return

@@ -6,7 +6,6 @@ import com.openreplay.models.script.ORMobileNetworkCall
 import java.net.HttpURLConnection
 import java.nio.charset.StandardCharsets
 import org.json.JSONObject
-import java.io.IOException
 
 open class NetworkListener {
     private val startTime: Long = System.currentTimeMillis()
@@ -35,15 +34,6 @@ open class NetworkListener {
             it != null
         } as Map<String, String>
 
-//        connection.doInput = true // This line is necessary if you're planning to read the input stream.
-
-//        requestBody = try {
-//            connection.inputStream?.bufferedReader().use { it?.readText() } ?: ""
-//        } catch (e: IOException) {
-//            Log.d("NetworkListener", "error getting request body (start request): ${e.message}")
-//            ""
-//        }
-
         connection.inputStream?.let {
             requestBody = it.readBytes().toString(StandardCharsets.UTF_8)
         } ?: run {
@@ -51,30 +41,6 @@ open class NetworkListener {
             Log.d("DebugUtils", "error getting request body (start request)")
         }
     }
-
-//    fun finish(connection: HttpURLConnection?, data: ByteArray?) {
-//        val endTime = System.currentTimeMillis()
-//        val responseBody = data?.toString(StandardCharsets.UTF_8)
-//
-//        val requestContent = mapOf(
-//            "body" to sanitizeBody(requestBody),
-//            "headers" to sanitizeHeaders(requestHeaders)
-//        )
-//
-//        val responseHeaders = connection?.headerFields?.mapValues { it.value.firstOrNull() ?: "" } ?: emptyMap()
-//        val responseContent = mapOf(
-//            "body" to sanitizeBody(responseBody),
-//            "headers" to sanitizeHeaders(responseHeaders)
-//        )
-//
-//        val requestJSON = JSONObject(requestContent).toString()
-//        val responseJSON = JSONObject(responseContent).toString()
-//
-//        val status = connection?.responseCode ?: 0
-//        val duration = endTime - startTime
-//
-//        sendNetworkMessage(url, method, requestJSON, responseJSON, status, duration)
-//    }
 
     fun finish(connection: HttpURLConnection?, data: ByteArray?) {
         val endTime = System.currentTimeMillis()

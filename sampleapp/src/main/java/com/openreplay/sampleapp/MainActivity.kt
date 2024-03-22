@@ -48,7 +48,7 @@ class MainActivity : TrackingActivity() {
         val user = User(id = 1, name = "John Doe", email = "john.doe@example.com")
         tracker.event("userCreated", user)
 
-        tracker.sanitizeView(navView)
+//        tracker.sanitizeView(navView)
 
         makeSampleRequest()
     }

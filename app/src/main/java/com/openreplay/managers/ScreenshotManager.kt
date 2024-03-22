@@ -6,11 +6,10 @@ import NetworkManager
 import android.app.Activity
 import android.content.Context
 import android.graphics.*
+import android.util.Log
 import android.view.View
 import com.openreplay.OpenReplay
-import com.openreplay.models.script.withSize
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream
@@ -18,7 +17,6 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
-import java.nio.ByteBuffer
 import java.util.*
 import java.util.zip.GZIPOutputStream
 import kotlin.concurrent.fixedRateTimer
@@ -40,9 +38,9 @@ object ScreenshotManager {
 
     fun start(context: Context, startTs: Long) {
         this.appContext = context
-//        firstTs = startTs
-        startCapturing()
-//        startCycleBuffer()
+        firstTs = startTs
+        startCapturing(500)
+        startCycleBuffer()
     }
 
 
@@ -53,9 +51,10 @@ object ScreenshotManager {
         }
     }
 
-    private fun stopCapturing() {
+    fun stopCapturing() {
         timer?.cancel()
         timer = null
+        stopCycleBuffer()
     }
 
     private fun captureScreenshot() {
@@ -81,7 +80,8 @@ object ScreenshotManager {
 
         // Draw masks over sanitized elements
         sanitizedElements.forEach { sanitizedView ->
-            if (sanitizedView.visibility == View.VISIBLE) {
+            Log.d("ScreenshotManager", "Sanitized view: ${sanitizedView.visibility}")
+            if (sanitizedView.visibility == View.VISIBLE && sanitizedView.isAttachedToWindow) {
                 val location = IntArray(2)
                 sanitizedView.getLocationInWindow(location)
                 val rootViewLocation = IntArray(2)
@@ -138,10 +138,9 @@ object ScreenshotManager {
         ByteArrayOutputStream().use { outputStream ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, 50, outputStream)
             val screenshotData = outputStream.toByteArray()
-            val gzippedData = gzipCompress(screenshotData)
 
             saveToLocalFilesystem(appContext, screenshotData, "screenshot-${System.currentTimeMillis()}.jpg")
-            screenshots.add(Pair(gzippedData, System.currentTimeMillis()))
+            screenshots.add(Pair(screenshotData, System.currentTimeMillis()))
             sendScreenshots()
         }
     }
@@ -180,7 +179,7 @@ object ScreenshotManager {
             images.forEach { (imageData, timestamp) ->
                 val filename = "${firstTs}_1_$timestamp.jpeg"
                 entries.add(filename to imageData)
-                lastTs = timestamp // Update lastTs to the timestamp of the last processed screenshot
+                lastTs = timestamp
             }
 
             val combinedData = ByteArrayOutputStream()
@@ -206,7 +205,7 @@ object ScreenshotManager {
         }
     }
 
-    fun startCycleBuffer() {
+    private fun startCycleBuffer() {
         bufferTimer = fixedRateTimer("cycleBuffer", false, 0L, 30_000) {
             cycleBuffer()
         }

@@ -111,7 +111,7 @@ class ORTracker private constructor(private val context: Context) {
     }
 
     private fun startSession(options: OROptions) {
-        SessionRequest.create(doNotRecord = false) { sessionResponse ->
+        SessionRequest.create(appContext!!, doNotRecord = false) { sessionResponse ->
             sessionResponse ?: return@create println("OpenReplay: no response from /start request")
             sessionStartTs = Date().time
             val captureSettings = getCaptureSettings(
@@ -145,6 +145,7 @@ class ORTracker private constructor(private val context: Context) {
         Analytics.stop()
         MessageCollector.stop()
         PerformanceListener.getInstance(context).stop()
+        ScreenshotManager.stopCapturing()
     }
 
     fun setUserID(userID: String) {
