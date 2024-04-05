@@ -1,7 +1,5 @@
 package com.openreplay
 
-import android.view.View
-
 object OpenReplay {
     var options: Options = Options()
 
@@ -11,6 +9,8 @@ object OpenReplay {
         val projectKey: String = "34LtpOwyUI2ELFUNVkMn",
         val bufferingMode: Boolean = true,
         var sessionStartTs: Long = 0,
+        var screenshotQuality: Int = 10,
+        var fps: Int = 3
     )
 
     fun shared(): OpenReplay {

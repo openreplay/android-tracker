@@ -267,7 +267,7 @@ class ORMobileSwipeEvent(
 ) : ORMessage(ORMessageType.MobileSwipeEvent) {
 
     override fun contentData(): ByteArray {
-        return this.prefixData() + withSize(fromValues(label, direction, x.toULong(), y.toULong()))
+        return this.prefixData() + withSize(fromValues(label, x.toULong(), y.toULong(), direction))
     }
 
     override fun toString(): String {

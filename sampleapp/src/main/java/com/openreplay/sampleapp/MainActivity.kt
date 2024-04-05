@@ -39,18 +39,18 @@ class MainActivity : TrackingActivity() {
 
 
         val tracker = ORTracker.getInstance(this)
-        tracker.start("34LtpOwyUI2ELFUNVkMn", OROptions.defaults)
-        tracker.setUserID("Shekar")
-        tracker.setMetadata("plan", "free")
+        tracker.start("34LtpOwyUI2ELFUNVkMn", OROptions.defaults, onStarted = {
+            tracker.setUserID("Shekar")
+            tracker.setMetadata("plan", "free")
 
-        data class User(val id: Int, val name: String, val email: String)
+            data class User(val id: Int, val name: String, val email: String)
 
-        val user = User(id = 1, name = "John Doe", email = "john.doe@example.com")
-        tracker.event("userCreated", user)
+            val user = User(id = 1, name = "John Doe", email = "john.doe@example.com")
+            tracker.event("userCreated", user)
 
-//        tracker.sanitizeView(navView)
-
-        makeSampleRequest()
+            makeSampleRequest()
+        })
+        tracker.sanitizeView(navView)
     }
 }
 

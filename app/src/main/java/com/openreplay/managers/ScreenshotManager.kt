@@ -32,14 +32,16 @@ object ScreenshotManager {
     private lateinit var appContext: Context
     private var sanitizedElements: MutableList<View> = mutableListOf()
 
-    fun setSettings(settings: Pair<Double, Double>) {
-        // Set up the screenshot manager
+    fun setSettings(settings: Pair<Int, Int>) {
+        val (interval, quality) = settings
+        OpenReplay.options.screenshotQuality = quality
+        OpenReplay.options.fps = interval
     }
 
     fun start(context: Context, startTs: Long) {
         this.appContext = context
         firstTs = startTs
-        startCapturing(200)
+        startCapturing(OpenReplay.options.fps.toLong())
         startCycleBuffer()
     }
 
@@ -136,7 +138,7 @@ object ScreenshotManager {
 
     private fun compressAndSend(bitmap: Bitmap) = GlobalScope.launch {
         ByteArrayOutputStream().use { outputStream ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 10, outputStream)
+            bitmap.compress(Bitmap.CompressFormat.JPEG, OpenReplay.options.screenshotQuality, outputStream)
             val screenshotData = outputStream.toByteArray()
 
             saveToLocalFilesystem(appContext, screenshotData, "screenshot-${System.currentTimeMillis()}.jpg")

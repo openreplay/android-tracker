@@ -60,12 +60,12 @@ class ORTracker private constructor(private val context: Context) {
         event(name, jsonPayload)
     }
 
-    fun event(name: String, jsonPayload: String) {
+    private fun event(name: String, jsonPayload: String) {
         val message = ORMobileEvent(name, payload = jsonPayload)
         MessageCollector.sendMessage(message)
     }
 
-    fun start(projectKey: String, options: OROptions) {
+    fun start(projectKey: String, options: OROptions, onStarted: () -> Unit) {
         this.options = options
         this.projectKey = projectKey
 
@@ -102,7 +102,7 @@ class ORTracker private constructor(private val context: Context) {
 
                 // Handling tracker state
                 if (trackerState == CheckState.CAN_START) {
-                    startSession(options)
+                    startSession(options, onStarted)
                 }
             }
         }
@@ -110,10 +110,12 @@ class ORTracker private constructor(private val context: Context) {
         connectivityManager.registerDefaultNetworkCallback(networkCallback)
     }
 
-    private fun startSession(options: OROptions) {
+    private fun startSession(options: OROptions, onStarted: () -> Unit) {
         SessionRequest.create(appContext!!, doNotRecord = false) { sessionResponse ->
             sessionResponse ?: return@create println("OpenReplay: no response from /start request")
             sessionStartTs = Date().time
+
+            onStarted()
             val captureSettings = getCaptureSettings(
                 fps = 3,
                 quality = "high"
@@ -172,15 +174,15 @@ class ORTracker private constructor(private val context: Context) {
     }
 }
 
-fun getCaptureSettings(fps: Int, quality: String): Pair<Double, Double> {
+fun getCaptureSettings(fps: Int, quality: String): Pair<Int, Int> {
     val limitedFPS = min(max(fps, 1), 99)
-    val captureRate = 1.0 / limitedFPS
+    val captureRate = 1000 / limitedFPS // Milliseconds per frame
 
     val imgCompression = when (quality.lowercase()) {
-        "low" -> 0.4
-        "standard" -> 0.5
-        "high" -> 0.6
-        else -> 0.5 // default to standard if quality string is not recognized
+        "low" -> 10
+        "standard" -> 30
+        "high" -> 60
+        else -> 30 // default to standard if quality string is not recognized
     }
 
     return Pair(captureRate, imgCompression)

@@ -14,13 +14,21 @@ open class NetworkListener {
     private var requestBody: String? = null
     private var requestHeaders: Map<String, String>? = null
 
-    private val ignoredKeys = listOf("password")
-    private val ignoredHeaders = listOf("Authentication", "Auth")
+    private var ignoredKeys = listOf("password")
+    private var ignoredHeaders = listOf("Authentication", "Auth")
 
     constructor()
 
     constructor(connection: HttpURLConnection) {
         start(connection)
+    }
+
+    fun setIgnoredKeys(ignoredKeys: List<String>) {
+        this.ignoredKeys = ignoredKeys
+    }
+
+    fun setIgnoredHeaders(ignoredHeaders: List<String>) {
+        this.ignoredHeaders = ignoredHeaders
     }
 
     private fun start(connection: HttpURLConnection) {
