@@ -31,18 +31,19 @@ object ScreenshotManager {
     private var bufferTimer: Timer? = null
     private lateinit var appContext: Context
     private var sanitizedElements: MutableList<View> = mutableListOf()
+    private var quality: Int = 10
 
     fun setSettings(settings: Pair<Int, Int>) {
         val (interval, quality) = settings
-        OpenReplay.options.screenshotQuality = quality
-        OpenReplay.options.fps = interval
+        this.quality = quality
+//        OpenReplay.options.fps = interval
     }
 
     fun start(context: Context, startTs: Long) {
         this.appContext = context
         firstTs = startTs
-        startCapturing(OpenReplay.options.fps.toLong())
-        startCycleBuffer()
+        startCapturing(1000 / OpenReplay.options.fps.toLong())
+//        startCycleBuffer()
     }
 
 
@@ -138,10 +139,10 @@ object ScreenshotManager {
 
     private fun compressAndSend(bitmap: Bitmap) = GlobalScope.launch {
         ByteArrayOutputStream().use { outputStream ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, OpenReplay.options.screenshotQuality, outputStream)
+            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
             val screenshotData = outputStream.toByteArray()
 
-            saveToLocalFilesystem(appContext, screenshotData, "screenshot-${System.currentTimeMillis()}.jpg")
+            // saveToLocalFilesystem(appContext, screenshotData, "screenshot-${System.currentTimeMillis()}.jpg")
             screenshots.add(Pair(screenshotData, System.currentTimeMillis()))
             sendScreenshots()
         }
@@ -154,7 +155,7 @@ object ScreenshotManager {
         }
     }
 
-    suspend fun syncBuffers() {
+    fun syncBuffers() {
         val buf1 = screenshots.size
         val buf2 = screenshotsBackup.size
         tick = 0
@@ -207,7 +208,7 @@ object ScreenshotManager {
         }
     }
 
-    private fun startCycleBuffer() {
+    fun startCycleBuffer() {
         bufferTimer = fixedRateTimer("cycleBuffer", false, 0L, 30_000) {
             cycleBuffer()
         }
@@ -218,16 +219,17 @@ object ScreenshotManager {
         bufferTimer = null
     }
 
-    private fun cycleBuffer() {
-        if (OpenReplay.options.bufferingMode) {
-            if ((tick % 2).toInt() == 0) {
-                screenshots.clear()
-            } else {
-                screenshotsBackup.clear()
+    fun cycleBuffer() {
+        bufferTimer = fixedRateTimer("cycleBuffer", false, 0L, 30_000) {
+            if (OpenReplay.bufferingMode) {
+                if ((tick % 2).toInt() == 0) {
+                    screenshots.clear()
+                } else {
+                    screenshotsBackup.clear()
+                }
+                tick++
             }
-            tick++
         }
-        // Note: This code runs on a background thread, ensure any UI updates are posted to the main thread
     }
 
     fun addSanitizedElement(view: View) {

@@ -6,9 +6,10 @@ import androidx.navigation.findNavController
 import androidx.navigation.ui.AppBarConfiguration
 import androidx.navigation.ui.setupActionBarWithNavController
 import androidx.navigation.ui.setupWithNavController
-import com.openreplay.ORTracker
+import com.openreplay.OpenReplay
 import com.openreplay.listeners.NetworkListener
 import com.openreplay.listeners.TrackingActivity
+import com.openreplay.listeners.trackViewAppearances
 import com.openreplay.models.OROptions
 import com.openreplay.sampleapp.databinding.ActivityMainBinding
 import java.io.BufferedReader
@@ -27,7 +28,6 @@ class MainActivity : TrackingActivity() {
         setContentView(binding.root)
 
         val navView: BottomNavigationView = binding.navView
-
         val navController = findNavController(R.id.nav_host_fragment_activity_main)
         val appBarConfiguration = AppBarConfiguration(
             setOf(
@@ -36,21 +36,22 @@ class MainActivity : TrackingActivity() {
         )
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
+        navView.trackViewAppearances("MainActivity", "BottomNavigationView")
 
+        OpenReplay.serverURL = "https://foss.openreplay.com/ingest"
+        // ee = fAo5NTvCQ8EqWtn1uL7q
+        // foss  =      34LtpOwyUI2ELFUNVkMn
+        OpenReplay.start(this, "34LtpOwyUI2ELFUNVkMn", OROptions.defaults, onStarted = {
+            println("OpenReplay started")
 
-        val tracker = ORTracker.getInstance(this)
-        tracker.start("34LtpOwyUI2ELFUNVkMn", OROptions.defaults, onStarted = {
-            tracker.setUserID("Shekar")
-            tracker.setMetadata("plan", "free")
-
-            data class User(val id: Int, val name: String, val email: String)
+            OpenReplay.setUserID("Shekar")
+            OpenReplay.setMetadata("plan", "free")
 
             val user = User(id = 1, name = "John Doe", email = "john.doe@example.com")
-            tracker.event("userCreated", user)
+            OpenReplay.event("userCreated", user)
 
             makeSampleRequest()
         })
-        tracker.sanitizeView(navView)
     }
 }
 
@@ -86,3 +87,5 @@ fun makeSampleRequest() {
         }
     }.start()
 }
+
+data class User(val id: Int, val name: String, val email: String)

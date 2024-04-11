@@ -6,20 +6,25 @@ import android.graphics.Rect
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.InputType
 import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.doAfterTextChanged
+import com.openreplay.OpenReplay
+import com.openreplay.managers.DebugUtils
 import com.openreplay.managers.MessageCollector
 import com.openreplay.managers.ScreenshotManager
 import com.openreplay.models.script.ORMobileClickEvent
+import com.openreplay.models.script.ORMobileEvent
 import com.openreplay.models.script.ORMobileInputEvent
 import com.openreplay.models.script.ORMobileSwipeEvent
 import kotlin.math.abs
@@ -120,6 +125,18 @@ open class TrackingActivity : AppCompatActivity() {
         })
     }
 
+    override fun onStart() {
+        super.onStart()
+
+        println("TrackingActivity started ${this::class.java.simpleName} started")
+    }
+
+    override fun onStop() {
+        super.onStop()
+
+        println("TrackingActivity ${this::class.java.simpleName} stopped")
+    }
+
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         gestureDetector.onTouchEvent(event)
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
@@ -171,14 +188,76 @@ class TrackingFrameLayout(context: Context, attrs: AttributeSet?) : FrameLayout(
 }
 
 fun View.trackViewAppearances(screenName: String, viewName: String) {
-    // Handle view appearance tracking
+    val message = ORMobileEvent(name = "viewAppeared", payload = "$screenName:$viewName")
+    MessageCollector.sendMessage(message)
 }
 
 fun EditText.trackTextInput(label: String? = null, masked: Boolean = false) {
-    this.doAfterTextChanged { text ->
-        val message = ORMobileInputEvent(label = label ?: "Input", value = text.toString(), valueMasked = masked)
-        MessageCollector.sendMessage(message)
+    this.setOnFocusChangeListener { view, hasFocus ->
+        if (!hasFocus) {
+            // The EditText has lost focus
+            val sender = view as EditText
+            textInputFinished(sender, label, masked)
+        }
     }
+
+    this.setOnEditorActionListener { v, actionId, _ ->
+        if (actionId == EditorInfo.IME_ACTION_DONE || actionId == EditorInfo.IME_ACTION_NEXT || actionId == EditorInfo.IME_ACTION_SEND) {
+            val sender = v as EditText
+            textInputFinished(sender, label, masked)
+            false
+        } else {
+            false
+        }
+    }
+
+
+//    this.doAfterTextChanged { text ->
+//        if (OpenReplay.options.debugLogs) {
+//            DebugUtils.log(">>>>>Text finish ${text.toString()} ${this.hint ?: "no_placeholder"}")
+//        }
+//
+//        val textToSend =
+//            if (this.inputType and InputType.TYPE_TEXT_VARIATION_PASSWORD == InputType.TYPE_TEXT_VARIATION_PASSWORD) {
+//                "***"
+//            } else {
+//                text.toString()
+//            }
+//
+//        MessageCollector.sendMessage(
+//            ORMobileInputEvent(
+//                value = textToSend,
+//                valueMasked = isPasswordInputType() || masked,
+//                label = this.hint?.toString() ?: ""
+//            )
+//        )
+//    }
+}
+
+fun textInputFinished(view: EditText, label: String?, masked: Boolean) {
+    val textToSend =
+        if (view.inputType and InputType.TYPE_TEXT_VARIATION_PASSWORD == InputType.TYPE_TEXT_VARIATION_PASSWORD) {
+            "***"
+        } else {
+            view.text.toString()
+        }
+
+    MessageCollector.sendMessage(
+        ORMobileInputEvent(
+            value = textToSend,
+            valueMasked = view.isPasswordInputType() || masked,
+            label = label ?: view.hint?.toString() ?: ""
+        )
+    )
+}
+
+fun EditText.isPasswordInputType(): Boolean {
+    val inputTypes = listOf(
+        InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD,
+        InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
+        InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+    )
+    return inputTypes.any { it == this.inputType }
 }
 
 fun EditText.sanitize() {

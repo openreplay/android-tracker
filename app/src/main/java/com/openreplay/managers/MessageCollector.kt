@@ -11,6 +11,7 @@ import java.io.IOException
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import kotlin.collections.ArrayList
 
 data class BatchArch(
     var name: String,
@@ -39,7 +40,7 @@ object MessageCollector {
     //    private lateinit var context: Context
     private val imagesWaiting = mutableListOf<BatchArch>()
     private val imagesSending = mutableListOf<BatchArch>()
-    private val messagesWaiting = mutableListOf<ByteArray>()
+    private var messagesWaiting = mutableListOf<ByteArray>()
     private val messagesWaitingBackup = mutableListOf<ByteArray>()
     private var nextMessageIndex = 0
     private var sendingLastMessages = false
@@ -58,7 +59,8 @@ object MessageCollector {
     }
 
 //    init {
-//        startCycleBuffer()
+////        startCycleBuffer()
+////        this.lateMessagesFile = File(context.cacheDir, "lateMessages.dat")
 //    }
 
     private fun startCycleBuffer() {
@@ -68,8 +70,8 @@ object MessageCollector {
     }
 
 
-    fun start(lateMessagesFile: File?) {
-        this.lateMessagesFile = lateMessagesFile
+    fun start() {
+        this.lateMessagesFile = OpenReplay.getLateMessagesFile()
 
         sendIntervalFuture = executorService.scheduleAtFixedRate({
             flush()
@@ -151,7 +153,7 @@ object MessageCollector {
             imagesSending.add(images)
 
             DebugUtils.log("Sending images ${images.name} ${images.data.size}")
-            NetworkManager.sendImages(OpenReplay.options.projectKey, images.data, images.name) { success ->
+            NetworkManager.sendImages(OpenReplay.projectKey!!, images.data, images.name) { success ->
                 imagesSending.removeAll { it.name == images.name }
                 if (!success) {
                     imagesWaiting.add(0, images) // Re-add to the start of the queue if not successful
@@ -161,11 +163,11 @@ object MessageCollector {
     }
 
     fun sendMessage(message: ORMessage) {
-//        if (OpenReplay.options.bufferingMode) {
-//            ConditionsManager.shared.processMessage(message)?.let { trigger ->
-//                OpenReplay.triggerRecording(trigger)
-//            }
-//        }
+        if (OpenReplay.bufferingMode) {
+            ConditionsManager.processMessage(message)?.let { trigger ->
+                OpenReplay.triggerRecording(trigger)
+            }
+        }
         val data = message.contentData()
         if (OpenReplay.options.debugLogs) {
             if (!message.toString().contains("IOSLog") && !message.toString().contains("IOSNetworkCall")) {
@@ -178,6 +180,23 @@ object MessageCollector {
         sendRawMessage(data)
     }
 
+    fun syncBuffers() {
+        val buf1 = messagesWaiting.size
+        val buf2 = messagesWaitingBackup.size
+        tick = 0
+        bufferTimer?.removeCallbacksAndMessages(null)
+        bufferTimer = null
+
+        if (buf1 > buf2) {
+            messagesWaitingBackup.clear()
+        } else {
+            messagesWaiting = ArrayList(messagesWaitingBackup)
+            messagesWaitingBackup.clear()
+        }
+
+        flushMessages()
+    }
+
     private fun sendRawMessage(data: ByteArray) {
         executorService.execute {
             if (data.size > maxMessagesSize) {
@@ -187,7 +206,7 @@ object MessageCollector {
             synchronized(messagesWaiting) {
                 messagesWaiting.add(data)
             }
-            if (OpenReplay.options.bufferingMode) {
+            if (OpenReplay.bufferingMode) {
                 synchronized(messagesWaitingBackup) {
                     messagesWaitingBackup.add(data)
                 }
@@ -196,7 +215,7 @@ object MessageCollector {
             synchronized(messagesWaiting) {
                 messagesWaiting.forEach { totalWaitingSize += it.size }
             }
-            if (!OpenReplay.options.bufferingMode && totalWaitingSize > (maxMessagesSize * 0.8).toInt()) {
+            if (!OpenReplay.bufferingMode && totalWaitingSize > (maxMessagesSize * 0.8).toInt()) {
                 flushMessages()
             }
         }
@@ -218,11 +237,11 @@ object MessageCollector {
         }, 2000) // 2.0 seconds delay
     }
 
-    private fun cycleBuffer() {
+    fun cycleBuffer() {
         // Example updating timestamp, adjust accordingly
-        OpenReplay.options.sessionStartTs = System.currentTimeMillis()
+        OpenReplay.sessionStartTs = System.currentTimeMillis()
 
-        if (OpenReplay.options.bufferingMode) {
+        if (OpenReplay.bufferingMode) {
             if (tick % 2 == 0) {
                 messagesWaiting.clear()
             } else {

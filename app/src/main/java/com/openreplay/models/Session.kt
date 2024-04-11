@@ -10,13 +10,12 @@ import java.io.Serializable
 import com.openreplay.managers.DebugUtils
 import com.openreplay.managers.UserDefaults
 import kotlin.math.abs
-import kotlin.math.sqrt
 
 object SessionRequest {
     private var params = mutableMapOf<String, Any>()
 
     fun create(context: Context, doNotRecord: Boolean, completion: (SessionResponse?) -> Unit) {
-        val projectKey = OpenReplay.options.projectKey
+//        val projectKey = OpenReplay.projectKey
 //        val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
 //        val batteryLevel = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
 //        val batteryStatus = batteryManager.getIntProperty(BatteryManager.BATTERY_STATUS_UNKNOWN)
@@ -41,10 +40,10 @@ object SessionRequest {
             "width" to resolution.first,
             "height" to resolution.second,
             "doNotRecord" to doNotRecord,
-            "projectKey" to projectKey,
-            "trackerVersion" to OpenReplay.options.pkgVersion, // Assuming OpenReplay.options.pkgVersion is not needed or is the same
+            "projectKey" to OpenReplay.projectKey!!,
+            "trackerVersion" to OpenReplay.options.pkgVersion,
             "revID" to "N/A",
-            "userUUID" to UserDefaults.userUUID, // Replace with dynamic retrieval
+            "userUUID" to UserDefaults.userUUID,
             "userOSVersion" to Build.VERSION.RELEASE,
             "userDevice" to deviceModel,
             "userDeviceType" to deviceType,
@@ -78,12 +77,18 @@ object SessionRequest {
         }
     }
 
+//    fun isTablet(context: Context): Boolean {
+//        val displayMetrics = context.resources.displayMetrics
+//        val widthDp = displayMetrics.widthPixels / displayMetrics.density
+//        val heightDp = displayMetrics.heightPixels / displayMetrics.density
+//        val screenDiagonalDp = sqrt((widthDp * widthDp + heightDp * heightDp).toDouble()).toInt()
+//        return screenDiagonalDp >= 600 // Threshold for considering a device as a tablet
+//    }
+
     fun isTablet(context: Context): Boolean {
-        val displayMetrics = context.resources.displayMetrics
-        val widthDp = displayMetrics.widthPixels / displayMetrics.density
-        val heightDp = displayMetrics.heightPixels / displayMetrics.density
-        val screenDiagonalDp = sqrt((widthDp * widthDp + heightDp * heightDp).toDouble()).toInt()
-        return screenDiagonalDp >= 600 // Threshold for considering a device as a tablet
+        val configuration = context.resources.configuration
+        val smallestScreenWidthDp = configuration.smallestScreenWidthDp
+        return smallestScreenWidthDp >= 600
     }
 
 
@@ -109,7 +114,8 @@ data class SessionResponse(
     val imagesHashList: List<String>?,
     val sessionID: String,
     val fps: Int,
-    val quality: String
+    val quality: String,
+    val projectID: String
 ) : Serializable
 
 fun getTimezone(): String {

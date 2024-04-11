@@ -96,6 +96,21 @@ class DataReader(private val data: ByteArray) {
     }
 }
 
+class ORMobileCrash(
+    val name: String,
+    val reason: String,
+    val stacktrace: String,
+) : ORMessage(ORMessageType.MobileCrash) {
+
+    override fun contentData(): ByteArray {
+        return this.prefixData() + withSize(fromValues(name, reason, stacktrace))
+    }
+
+    override fun toString(): String {
+        return "-->> MobileCrash(97): timestamp: $timestamp name: $name reason: $reason stacktrace: $stacktrace"
+    }
+}
+
 class ORMobileInputEvent(
     val label: String,
     val value: String,
@@ -163,7 +178,7 @@ class ORMobileNetworkCall(
 ) : ORMessage(ORMessageType.MobileNetworkCall) {
 
     override fun contentData(): ByteArray {
-        return this.prefixData() + withSize(fromValues(type, method, URL, request, response, status, duration))
+        return this.prefixData() + withSize(fromValues(type, method, URL, response, request, status, duration))
     }
 
     override fun toString(): String {

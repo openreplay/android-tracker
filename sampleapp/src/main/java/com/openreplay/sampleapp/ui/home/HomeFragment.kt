@@ -35,7 +35,6 @@ class HomeFragment : Fragment() {
         val loginButton = binding.login
 
         passwordEditText.trackTextInput("password", true)
-
         usernameEditText.trackTextInput("username")
         usernameEditText.sanitize()
 
