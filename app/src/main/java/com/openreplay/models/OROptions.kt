@@ -1,7 +1,5 @@
 package com.openreplay.models
 
-import java.io.Serializable
-
 enum class RecordingQuality {
     Low, Standard, High
 }
@@ -13,10 +11,10 @@ class OROptions(
     val logs: Boolean = true,
     val screen: Boolean = true,
     val wifiOnly: Boolean = true,
-    val debugLogs: Boolean = true,
+    val debugLogs: Boolean = false,
     val debugImages: Boolean = false,
     val fps: Int = 1,
-    val screenshotQuality: RecordingQuality = RecordingQuality.Standard,
+    val screenshotQuality: RecordingQuality = RecordingQuality.Low,
     val pkgVersion: String = "1.0.10"
 ) {
     companion object {

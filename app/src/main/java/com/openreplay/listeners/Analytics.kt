@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.text.InputType
 import android.util.AttributeSet
+import android.util.Log
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
@@ -19,14 +20,12 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.doAfterTextChanged
+import androidx.lifecycle.*
 import com.openreplay.OpenReplay
 import com.openreplay.managers.DebugUtils
 import com.openreplay.managers.MessageCollector
 import com.openreplay.managers.ScreenshotManager
-import com.openreplay.models.script.ORMobileClickEvent
-import com.openreplay.models.script.ORMobileEvent
-import com.openreplay.models.script.ORMobileInputEvent
-import com.openreplay.models.script.ORMobileSwipeEvent
+import com.openreplay.models.script.*
 import kotlin.math.abs
 import kotlin.math.atan2
 
@@ -48,6 +47,8 @@ enum class SwipeDirection {
 
 object Analytics {
     private var enabled: Boolean = false
+    private var observedViews: MutableList<View> = mutableListOf()
+    private var observedInputs: MutableList<EditText> = mutableListOf()
 
     fun start() {
         enabled = true
@@ -70,6 +71,20 @@ object Analytics {
 
     fun stop() {
         enabled = false
+    }
+
+    fun addObservedView(view: View, screenName: String, viewName: String) {
+        view.tag = "Screen: $screenName, View: $viewName"
+        observedViews.add(view)
+    }
+
+    fun addObservedInput(editText: EditText) {
+        observedInputs.add(editText)
+        editText.trackTextInput()
+//        editText.setOnEditorActionListener { v, actionId, event ->
+//            // Handle input finished event here
+//            true
+//        }
     }
 }
 
@@ -96,7 +111,6 @@ open class TrackingActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-//        gestureDetector = GestureDetector(this, this)
         gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapUp(e: MotionEvent): Boolean {
                 val clickedView = findViewAtPosition(rootView, e.x, e.y)
@@ -123,6 +137,8 @@ open class TrackingActivity : AppCompatActivity() {
                 return true
             }
         })
+
+        lifecycle.addObserver(GlobalViewTracker())
     }
 
     override fun onStart() {
@@ -182,7 +198,6 @@ open class TrackingActivity : AppCompatActivity() {
 
 class TrackingFrameLayout(context: Context, attrs: AttributeSet?) : FrameLayout(context, attrs) {
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        // Handle touch event tracking
         return super.dispatchTouchEvent(ev)
     }
 }
@@ -263,3 +278,91 @@ fun EditText.isPasswordInputType(): Boolean {
 fun EditText.sanitize() {
     ScreenshotManager.addSanitizedElement(this)
 }
+
+class ActivityLifecycleTracker : LifecycleEventObserver {
+    override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
+        when (event) {
+            Lifecycle.Event.ON_CREATE -> {
+                println("Activity created")
+            }
+
+            Lifecycle.Event.ON_START -> {
+                println("Activity started")
+            }
+
+            Lifecycle.Event.ON_RESUME -> {
+                println("Activity resumed")
+            }
+
+            Lifecycle.Event.ON_PAUSE -> {
+                println("Activity paused")
+            }
+
+            Lifecycle.Event.ON_STOP -> {
+                println("Activity stopped")
+            }
+
+            Lifecycle.Event.ON_DESTROY -> {
+                println("Activity destroyed")
+            }
+
+            Lifecycle.Event.ON_ANY -> {
+                println("Activity any")
+            }
+        }
+    }
+}
+
+fun trackAllTextViews(view: View) {
+//    if (view is TextView) {
+//        Analytics.addObservedView(view, "MainActivity", "TextView")
+//    }
+
+    if (view is EditText) {
+        Analytics.addObservedInput(view)
+    }
+
+    if (view is ViewGroup) {
+        for (i in 0 until view.childCount) {
+            trackAllTextViews(view.getChildAt(i))
+        }
+    }
+}
+
+class GlobalViewTracker : LifecycleEventObserver {
+    override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
+        when (event) {
+            Lifecycle.Event.ON_CREATE -> setupGlobalLayoutListener(source as AppCompatActivity)
+            else -> {} // Implement other lifecycle events as needed
+        }
+    }
+
+    private fun setupGlobalLayoutListener(activity: AppCompatActivity) {
+        val rootView = activity.findViewById<ViewGroup>(android.R.id.content)
+
+        activity.window.decorView.post {
+            trackAllTextViews(activity.window.decorView)
+        }
+
+//        rootView.viewTreeObserver.addOnGlobalLayoutListener {
+//            // Iterate over all the views in the layout
+//            for (i in 0 until rootView.childCount) {
+//                val view = rootView.getChildAt(i)
+//                inspectView(view, activity)
+//            }
+//        }
+    }
+
+    private fun inspectView(view: View, activity: AppCompatActivity) {
+        val screenName = activity::class.java.simpleName
+        val viewName = view::class.java.simpleName
+        val visibility = view.visibility == View.VISIBLE
+
+        // You might want to filter views further here
+        Log.d("ViewTracker", "Screen: $screenName, View: $viewName, Visible: $visibility")
+    }
+}
+
+//fun AppCompatActivity.observeLifecycleEvents() {
+//    lifecycle.addObserver(Analytics)
+//}

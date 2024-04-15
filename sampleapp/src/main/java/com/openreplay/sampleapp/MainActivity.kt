@@ -36,8 +36,10 @@ class MainActivity : TrackingActivity() {
         )
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
+
         navView.trackViewAppearances("MainActivity", "BottomNavigationView")
 
+//        OpenReplay.serverURL = "https://ee.openreplay.tools/ingest"
         OpenReplay.serverURL = "https://foss.openreplay.com/ingest"
         // ee = fAo5NTvCQ8EqWtn1uL7q
         // foss  =      34LtpOwyUI2ELFUNVkMn
@@ -51,6 +53,19 @@ class MainActivity : TrackingActivity() {
             OpenReplay.event("userCreated", user)
 
             makeSampleRequest()
+
+            Thread {
+                makeSampleBadRequest()
+                Thread.sleep(6000)
+            }.start()
+
+            // throw dummy exception after every 5 seconds
+//            Thread {
+//                while (true) {
+//                    Thread.sleep(5000)
+//                    throw RuntimeException("Dummy exception")
+//                }
+//            }.start()
         })
     }
 }
@@ -87,5 +102,31 @@ fun makeSampleRequest() {
         }
     }.start()
 }
+
+fun makeSampleBadRequest() {
+    Thread {
+        try {
+            val url = URL("https://jsonplaceholder.typicode.com/posts")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "POST"
+            connection.setRequestProperty("Content-Type", "application/json")
+
+            val networkListener = NetworkListener(connection)
+            val reader = BufferedReader(InputStreamReader(connection.errorStream))
+            val response = StringBuilder()
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                response.append(line)
+            }
+            reader.close()
+
+            // Using the network listener to log the finish event
+            networkListener.finish(connection, response.toString().toByteArray())
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }.start()
+}
+
 
 data class User(val id: Int, val name: String, val email: String)

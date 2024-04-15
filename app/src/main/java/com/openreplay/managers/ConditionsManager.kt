@@ -59,67 +59,51 @@ object ConditionsManager {
                     }
                 }
 
-                is ORMobileLog -> {
-                    activeCon.subConditions?.let { subConditions ->
-                        var logConditionsMet = true
-                        for (logCondition in subConditions) {
-                            when (logCondition.name) {
-                                "logSeverity" -> logConditionsMet =
-                                    logConditionsMet && logCondition.op(msg.severity)
-
-                                "logContent" -> logConditionsMet =
-                                    logConditionsMet && logCondition.op(msg.content)
-
-                                else -> continue
-                            }
-                        }
-                        if (logConditionsMet) return activeCon.name
-                    }
-                }
-
-//                is ORMobileCrash -> {
-//                    activeCon.subConditions?.let { subConditions ->
-//                        var crashConditionsMet = true
-//                        for (crashCondition in subConditions) {
-//                            when (crashCondition.name) {
-//                                "crashSeverity" -> crashConditionsMet =
-//                                    crashConditionsMet && crashCondition.op(msg.severity)
-//
-//                                "crashContent" -> crashConditionsMet =
-//                                    crashConditionsMet && crashCondition.op(msg.content)
-//
-//                                else -> continue
-//                            }
-//                        }
-//                        if (crashConditionsMet) return activeCon.name
-//                    }
-//                }
-                is ORMobileMetadata -> {
-                    activeCon.subConditions?.let { subConditions ->
-                        var metadataConditionsMet = true
-                        for (metadataCondition in subConditions) {
-                            metadataConditionsMet = when (metadataCondition.name) {
-                                "metadataKey" -> metadataConditionsMet && metadataCondition.op(msg.key)
-
-                                "metadataValue" -> metadataConditionsMet && metadataCondition.op(msg.value)
-
-                                else -> continue
-                            }
-                        }
-                        if (metadataConditionsMet) return activeCon.name
+                is ORMobileViewComponentEvent -> {
+                    if (activeCon.op(msg.viewName) || activeCon.op(msg.screenName)) {
+                        return activeCon.name
                     }
                 }
 
                 is ORMobileClickEvent -> {
-                    activeCon.subConditions?.let { subConditions ->
-                        var clickConditionsMet = true
-                        for (clickCondition in subConditions) {
-                            clickConditionsMet = when (clickCondition.name) {
-                                "clickLabel" -> clickConditionsMet && clickCondition.op(msg.label)
-                                else -> continue
-                            }
+                    if (activeCon.op(msg.label)) {
+                        return activeCon.name
+                    }
+                }
+
+                is ORMobileMetadata -> {
+                    if (activeCon.op(msg.key) || activeCon.op(msg.value)) {
+                        return activeCon.name
+                    }
+                }
+
+                is ORMobileEvent -> {
+                    if (activeCon.op(msg.name) || activeCon.op(msg.payload)) {
+                        return activeCon.name
+                    }
+                }
+
+                is ORMobileLog -> {
+                    if (activeCon.op(msg.content)) {
+                        return activeCon.name
+                    }
+                }
+
+                is ORMobileUserID -> {
+                    if (activeCon.op(msg.iD)) {
+                        return activeCon.name
+                    }
+                }
+
+                is ORMobilePerformanceEvent -> {
+                    if (msg.name == "memoryUsage") {
+                        if (activeCon.op((msg.value / 1024u).toString())) {
+                            return activeCon.name
                         }
-                        if (clickConditionsMet) return activeCon.name
+                    } else {
+                        if (activeCon.op(msg.value.toString())) {
+                            return activeCon.name
+                        }
                     }
                 }
 

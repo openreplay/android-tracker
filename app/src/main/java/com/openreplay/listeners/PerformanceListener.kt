@@ -1,3 +1,5 @@
+package com.openreplay.listeners
+
 import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -13,6 +15,7 @@ import com.openreplay.OpenReplay
 import com.openreplay.managers.DebugUtils
 import com.openreplay.models.script.ORMobilePerformanceEvent
 import java.io.File
+import kotlin.math.round
 
 class PerformanceListener private constructor(private val context: Context) : DefaultLifecycleObserver {
     companion object {
@@ -33,6 +36,7 @@ class PerformanceListener private constructor(private val context: Context) : De
     private var batteryLevelReceiver: BroadcastReceiver? = null
     private var cpuTimer: Timer? = null
     private var memTimer: Timer? = null
+    private var performanceTimer: Timer? = null
 
     init {
         // Example of registering to lifecycle events if the context is an Activity or Fragment
@@ -62,21 +66,54 @@ class PerformanceListener private constructor(private val context: Context) : De
 
     fun start() {
         if (!isActive) {
-//            getCpuMessage()
-            getMemoryMessage()
-
-            registerBatteryLevelReceiver()
+            reportCpuUsage()
+            reportMemoryUsage()
+//            registerBatteryLevelReceiver()
             setupTimers()
+//            setupPerformanceMonitoring()
             isActive = true
         }
     }
 
-    fun getCpuMessage() {
-        val cpu = cpuUsage()
-        if (cpu != null) {
-            val message = ORMobilePerformanceEvent(name = "mainThreadCPU", value = cpu.toULong())
-            MessageCollector.sendMessage(message)
+//    private fun setupPerformanceMonitoring() {
+//        performanceTimer = Timer().apply {
+//            scheduleAtFixedRate(object : TimerTask() {
+//                override fun run() {
+////                    Log.d("Performance", "Checking performance metrics")
+//                    reportCpuUsage()
+//                    reportMemoryUsage()
+//                }
+//            }, 0, 2000) // Measure every 5 seconds
+//        }
+//    }
+
+    private fun reportCpuUsage() {
+        val cpuUsage = calculateCpuUsage()
+        println("CPU Usage: $cpuUsage%")
+
+        val message = ORMobilePerformanceEvent(name = "mainThreadCPU", value = cpuUsage.toULong())
+        MessageCollector.sendMessage(message)
+    }
+
+    private fun reportMemoryUsage() {
+        val memoryUsage = memoryUsage()
+        println("Memory Usage: $memoryUsage MB")
+        val message = ORMobilePerformanceEvent(name = "memoryUsage", value = memoryUsage.toULong())
+        MessageCollector.sendMessage(message)
+    }
+
+    private var dummyResult: Double = 0.0
+    private fun calculateCpuUsage(): Double {
+        val startTime = System.nanoTime()
+        var result = 0.0
+        for (i in 0 until 1000000) {
+            result += (i * i) % 1234567
         }
+        dummyResult = result  // Assign to a volatile field to prevent optimization
+
+        val endTime = System.nanoTime()
+        val durationMs = (endTime - startTime) / 1_000_000.0  // Convert nanoseconds to milliseconds
+        return round(durationMs * 10) / 10.0
     }
 
     fun getMemoryMessage() {
@@ -104,15 +141,15 @@ class PerformanceListener private constructor(private val context: Context) : De
         cpuTimer = Timer().apply {
             schedule(object : TimerTask() {
                 override fun run() {
-//                    getCpuMessage()
+                    reportCpuUsage()
                 }
-            }, 0, 5000) // Every 5 seconds
+            }, 0, 10000) // Every 5 seconds
         }
 
         memTimer = Timer().apply {
             schedule(object : TimerTask() {
                 override fun run() {
-                    getMemoryMessage()
+                    reportMemoryUsage()
                 }
             }, 0, 10000) // Every 10 seconds
         }
@@ -128,57 +165,57 @@ class PerformanceListener private constructor(private val context: Context) : De
         MessageCollector.sendMessage(message)
     }
 
-    private fun getCpuInfo(): CpuInfo? {
-        File("/proc/stat").useLines { lines ->
-            val cpuLine = lines.firstOrNull { it.startsWith("cpu ") } ?: return null
-            val parts = cpuLine.split("\\s+".toRegex()).drop(1).mapNotNull { it.toLongOrNull() }
-            if (parts.size >= 8) {
-                val total = parts.sum()
-                return CpuInfo(total)
-            }
-            return null
-        }
-    }
+//    private fun getCpuInfo(): CpuInfo? {
+//        File("/proc/stat").useLines { lines ->
+//            val cpuLine = lines.firstOrNull { it.startsWith("cpu ") } ?: return null
+//            val parts = cpuLine.split("\\s+".toRegex()).drop(1).mapNotNull { it.toLongOrNull() }
+//            if (parts.size >= 8) {
+//                val total = parts.sum()
+//                return CpuInfo(total)
+//            }
+//            return null
+//        }
+//    }
 
-    private fun getAppCpuTime(pid: Int): Long {
-        File("/proc/$pid/stat").useLines { lines ->
-            val statLine = lines.firstOrNull() ?: return 0
-            val parts = statLine.split("\\s+".toRegex())
-            if (parts.size >= 17) {
-                val utime = parts[13].toLongOrNull() ?: 0
-                val stime = parts[14].toLongOrNull() ?: 0
-                return utime + stime
-            }
-            return 0
-        }
-    }
+//    private fun getAppCpuTime(pid: Int): Long {
+//        File("/proc/$pid/stat").useLines { lines ->
+//            val statLine = lines.firstOrNull() ?: return 0
+//            val parts = statLine.split("\\s+".toRegex())
+//            if (parts.size >= 17) {
+//                val utime = parts[13].toLongOrNull() ?: 0
+//                val stime = parts[14].toLongOrNull() ?: 0
+//                return utime + stime
+//            }
+//            return 0
+//        }
+//    }
 
-    data class CpuInfo(val total: Long)
+//    data class CpuInfo(val total: Long)
+//
+//    private fun cpuUsage(): Double? {
+//        try {
+//            val pid = Process.myPid()
+//            val cpuInfo1 = getCpuInfo()
+//            val appCpuTime1 = getAppCpuTime(pid)
+//
+//            Thread.sleep(1000) // Sleep for a second
+//
+//            val cpuInfo2 = getCpuInfo()
+//            val appCpuTime2 = getAppCpuTime(pid)
+//
+//            if (cpuInfo1 == null || cpuInfo2 == null) return null
+//
+//            val totalCpuTimeDelta = cpuInfo2.total - cpuInfo1.total
+//            val appCpuTimeDelta = appCpuTime2 - appCpuTime1
+//
+//            return if (totalCpuTimeDelta > 0) 100.0 * appCpuTimeDelta / totalCpuTimeDelta else null
+//        } catch (e: Exception) {
+//            e.printStackTrace()
+//            return null
+//        }
+//    }
 
-    fun cpuUsage(): Double? {
-        try {
-            val pid = Process.myPid()
-            val cpuInfo1 = getCpuInfo()
-            val appCpuTime1 = getAppCpuTime(pid)
-
-            Thread.sleep(1000) // Sleep for a second
-
-            val cpuInfo2 = getCpuInfo()
-            val appCpuTime2 = getAppCpuTime(pid)
-
-            if (cpuInfo1 == null || cpuInfo2 == null) return null
-
-            val totalCpuTimeDelta = cpuInfo2.total - cpuInfo1.total
-            val appCpuTimeDelta = appCpuTime2 - appCpuTime1
-
-            return if (totalCpuTimeDelta > 0) 100.0 * appCpuTimeDelta / totalCpuTimeDelta else null
-        } catch (e: Exception) {
-            e.printStackTrace()
-            return null
-        }
-    }
-
-    fun memoryUsage(): Long {
+    private fun memoryUsage(): Long {
         val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
         val memoryInfo = ActivityManager.MemoryInfo()
         activityManager?.getMemoryInfo(memoryInfo)

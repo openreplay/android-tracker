@@ -101,13 +101,38 @@ class ORMobileCrash(
     val reason: String,
     val stacktrace: String,
 ) : ORMessage(ORMessageType.MobileCrash) {
-
     override fun contentData(): ByteArray {
         return this.prefixData() + withSize(fromValues(name, reason, stacktrace))
     }
 
     override fun toString(): String {
         return "-->> MobileCrash(97): timestamp: $timestamp name: $name reason: $reason stacktrace: $stacktrace"
+    }
+}
+
+class ORMobileInternalError(
+    val content: String,
+) : ORMessage(ORMessageType.MobileInternalError) {
+    override fun contentData(): ByteArray {
+        return this.prefixData() + withSize(fromValues(content))
+    }
+
+    override fun toString(): String {
+        return "-->> MobileInternalError(104): timestamp: $timestamp content: $content"
+    }
+}
+
+class ORMobileViewComponentEvent(
+    val screenName: String,
+    val viewName: String,
+    val visible: Boolean,
+) : ORMessage(ORMessageType.MobileViewComponentEvent) {
+    override fun contentData(): ByteArray {
+        return this.prefixData() + withSize(fromValues(screenName, viewName, visible))
+    }
+
+    override fun toString(): String {
+        return "-->> MobileViewComponentEvent(98): timestamp: $timestamp screenName: $screenName viewName: $viewName visible: $visible"
     }
 }
 

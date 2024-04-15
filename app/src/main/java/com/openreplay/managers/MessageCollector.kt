@@ -37,7 +37,6 @@ data class BatchArch(
 }
 
 object MessageCollector {
-    //    private lateinit var context: Context
     private val imagesWaiting = mutableListOf<BatchArch>()
     private val imagesSending = mutableListOf<BatchArch>()
     private var messagesWaiting = mutableListOf<ByteArray>()
@@ -238,7 +237,6 @@ object MessageCollector {
     }
 
     fun cycleBuffer() {
-        // Example updating timestamp, adjust accordingly
         OpenReplay.sessionStartTs = System.currentTimeMillis()
 
         if (OpenReplay.bufferingMode) {

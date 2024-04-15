@@ -83,7 +83,7 @@ object ScreenshotManager {
 
         // Draw masks over sanitized elements
         sanitizedElements.forEach { sanitizedView ->
-            Log.d("ScreenshotManager", "Sanitized view: ${sanitizedView.visibility}")
+//            Log.d("ScreenshotManager", "Sanitized view: ${sanitizedView.visibility}")
             if (sanitizedView.visibility == View.VISIBLE && sanitizedView.isAttachedToWindow) {
                 val location = IntArray(2)
                 sanitizedView.getLocationInWindow(location)
