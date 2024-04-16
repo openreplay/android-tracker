@@ -222,8 +222,8 @@ class PerformanceListener private constructor(private val context: Context) : De
 
         val runtime = Runtime.getRuntime()
         val usedMemInMB = (runtime.totalMemory() - runtime.freeMemory()) / 1048576L
-        val maxHeapSizeInMB = runtime.maxMemory() / 1048576L
-        val availHeapSizeInMB = maxHeapSizeInMB - usedMemInMB
+        // val maxHeapSizeInMB = runtime.maxMemory() / 1048576L
+        // val availHeapSizeInMB = maxHeapSizeInMB - usedMemInMB
         return usedMemInMB
     }
 

@@ -9,6 +9,7 @@ import android.graphics.*
 import android.util.Log
 import android.view.View
 import com.openreplay.OpenReplay
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
@@ -34,16 +35,14 @@ object ScreenshotManager {
     private var quality: Int = 10
 
     fun setSettings(settings: Pair<Int, Int>) {
-        val (interval, quality) = settings
+        val (_, quality) = settings
         this.quality = quality
-//        OpenReplay.options.fps = interval
     }
 
     fun start(context: Context, startTs: Long) {
         this.appContext = context
         firstTs = startTs
         startCapturing(1000 / OpenReplay.options.fps.toLong())
-//        startCycleBuffer()
     }
 
 
@@ -137,6 +136,7 @@ object ScreenshotManager {
         }
     }
 
+    @OptIn(DelicateCoroutinesApi::class)
     private fun compressAndSend(bitmap: Bitmap) = GlobalScope.launch {
         ByteArrayOutputStream().use { outputStream ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
@@ -170,6 +170,7 @@ object ScreenshotManager {
         sendScreenshots()
     }
 
+    @OptIn(DelicateCoroutinesApi::class)
     private fun sendScreenshots() {
         val sessionId = NetworkManager.sessionId ?: return
         val archiveName = "$sessionId-$lastTs.tar.gz"

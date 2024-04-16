@@ -15,4 +15,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "OpenReplay"
 include(":app")
-include(":sampleapp")

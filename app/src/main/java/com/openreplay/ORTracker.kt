@@ -9,15 +9,12 @@ import com.openreplay.listeners.Analytics
 import com.openreplay.listeners.Crash
 import com.openreplay.listeners.LogsListener
 import com.openreplay.listeners.PerformanceListener
-import com.openreplay.managers.ConditionsManager
+import com.openreplay.managers.*
 import com.openreplay.models.OROptions
 import com.openreplay.models.SessionRequest
 import java.util.*
 import kotlin.math.max
 import kotlin.math.min
-import com.openreplay.managers.MessageCollector
-import com.openreplay.managers.ScreenshotManager
-import com.openreplay.managers.UserDefaults
 import com.openreplay.models.RecordingQuality
 import com.openreplay.models.script.ORMobileEvent
 import com.openreplay.models.script.ORMobileMetadata
@@ -57,7 +54,7 @@ object OpenReplay {
             }
         }
 
-//        connectivityManager.registerDefaultNetworkCallback(networkCallback)
+        connectivityManager.registerDefaultNetworkCallback(networkCallback)
         checkForLateMessages()
     }
 
@@ -131,6 +128,9 @@ object OpenReplay {
 
     fun triggerRecording(condition: String?) {
         this.bufferingMode = false
+        if (options.debugLogs) {
+            DebugUtils.log("Triggering recording with condition: $condition")
+        }
         SessionRequest.create(context = appContext!!, doNotRecord = false) { sessionResponse ->
             sessionResponse?.let {
                 MessageCollector.syncBuffers()

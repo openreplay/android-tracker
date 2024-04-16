@@ -338,7 +338,7 @@ class GlobalViewTracker : LifecycleEventObserver {
     }
 
     private fun setupGlobalLayoutListener(activity: AppCompatActivity) {
-        val rootView = activity.findViewById<ViewGroup>(android.R.id.content)
+//        val rootView = activity.findViewById<ViewGroup>(android.R.id.content)
 
         activity.window.decorView.post {
             trackAllTextViews(activity.window.decorView)

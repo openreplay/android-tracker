@@ -127,7 +127,7 @@ object ConditionsManager {
             filters.forEach() { filter ->
                 when (filter.type) {
                     "session_duration" -> {
-                        durationCond(dur = filter.value, name = condition.name)
+                        durationCond(dur = filter.value)
                     }
 
                     "network_message" -> {
@@ -163,7 +163,7 @@ object ConditionsManager {
         }
     }
 
-    private fun durationCond(dur: List<String>, name: String) {
+    private fun durationCond(dur: List<String>) {
         val scheduler = Executors.newSingleThreadScheduledExecutor()
         var scheduledFuture: ScheduledFuture<*>? = null
 
