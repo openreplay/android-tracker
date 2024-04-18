@@ -2,7 +2,7 @@ plugins {
     id("com.android.library")
     id("kotlin-android")
     id("maven-publish")
-    id("signing")
+//    id("signing")
 }
 
 android {
