@@ -1,64 +1,61 @@
 plugins {
-    id("com.android.library")
-    id("kotlin-android")
-    id("maven-publish")
-//    id("signing")
+    alias(libs.plugins.androidApplication)
+    alias(libs.plugins.jetbrainsKotlinAndroid)
 }
 
 android {
-    namespace = "com.openreplay"
+    namespace = "com.openreplay.sampleapp"
     compileSdk = 34
 
     defaultConfig {
+        applicationId = "com.openreplay.sampleapp"
         minSdk = 24
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildFeatures {
-            buildConfig = true
-        }
-        buildConfigField("String", "VERSION_NAME", "\"${project.version}\"")
+        targetSdk = 33
+        versionCode = 1
+        versionName = "1.0"
 
-        aarMetadata {
-            minCompileSdk = 29
-        }
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        val orServerUrl = System.getenv("OR_SERVER_URL")
+        val orProjectKey = System.getenv("OR_PROJECT_KEY")
+        buildConfigField("String", "SERVER_URL", "\"$orServerUrl\"")
+        buildConfigField("String", "PROJECT_KEY", "\"$orProjectKey\"")
     }
 
     buildTypes {
         release {
-            consumerProguardFiles("consumer-rules.pro")
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
     }
-
     kotlinOptions {
         jvmTarget = "1.8"
     }
-}
-
-publishing {
-    publications {
-        create<MavenPublication>("release") {
-            groupId = "com.openreplay"
-            artifactId = "openreplay"
-            version = "1.0.0"
-
-            afterEvaluate {
-                from(components["release"])
-            }
-        }
+    buildFeatures {
+        viewBinding = true
+        buildConfig = true
     }
 }
 
 dependencies {
-    implementation("androidx.appcompat:appcompat:1.6.1")
-    implementation("com.squareup.okhttp3:okhttp:5.0.0-alpha.9")
-    implementation("com.google.code.gson:gson:2.10.1")
-    testImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test.ext:junit:1.1.5")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
-    implementation("org.apache.commons:commons-compress:1.26.1")
-    implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.23")
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.material)
+    implementation(libs.androidx.constraintlayout)
+    implementation(libs.androidx.lifecycle.livedata.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
+    implementation(libs.androidx.navigation.fragment.ktx)
+    implementation(libs.androidx.navigation.ui.ktx)
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+    implementation(project(":tracker"))
 }
