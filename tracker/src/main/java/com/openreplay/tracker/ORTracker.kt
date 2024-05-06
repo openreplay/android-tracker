@@ -1,10 +1,14 @@
 package com.openreplay.tracker
 
 import NetworkManager
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.os.Build
 import android.view.View
 import com.google.gson.Gson
 import com.openreplay.tracker.listeners.Analytics
@@ -52,17 +56,32 @@ object OpenReplay {
         val connectivityManager =
             context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
-        val networkCallback = object : ConnectivityManager.NetworkCallback() {
-            override fun onCapabilitiesChanged(
-                network: android.net.Network,
-                capabilities: NetworkCapabilities
-            ) {
-                super.onCapabilitiesChanged(network, capabilities)
-                handleNetworkChange(capabilities, onStarted)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val networkCallback = object : ConnectivityManager.NetworkCallback() {
+                override fun onCapabilitiesChanged(
+                    network: android.net.Network,
+                    capabilities: NetworkCapabilities
+                ) {
+                    super.onCapabilitiesChanged(network, capabilities)
+                    handleNetworkChange(capabilities, onStarted)
+                }
             }
-        }
 
-        connectivityManager.registerDefaultNetworkCallback(networkCallback)
+            connectivityManager.registerDefaultNetworkCallback(networkCallback)
+        } else {
+            // For API levels below 24, listen for connectivity changes using BroadcastReceiver
+            val intentFilter = IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION)
+            context.registerReceiver(object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    val activeNetworkInfo = connectivityManager.activeNetworkInfo
+                    if (activeNetworkInfo != null && activeNetworkInfo.isConnected) {
+                        // Call your method to handle connectivity change
+                        sessionStartTs = Date().time
+                        startSession(onStarted)
+                    }
+                }
+            }, intentFilter)
+        }
         checkForLateMessages()
     }
 

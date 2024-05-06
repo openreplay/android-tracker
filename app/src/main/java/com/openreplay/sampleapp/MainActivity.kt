@@ -1,6 +1,7 @@
 package com.openreplay.sampleapp
 
 import android.os.Bundle
+import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import androidx.navigation.findNavController
 import androidx.navigation.ui.AppBarConfiguration
@@ -12,7 +13,7 @@ import com.openreplay.tracker.listeners.TrackingActivity
 import com.openreplay.tracker.models.OROptions
 
 
-class MainActivity : TrackingActivity() {
+class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
 
     override fun onCreate(savedInstanceState: Bundle?) {
