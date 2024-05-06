@@ -66,7 +66,12 @@ object Analytics {
     fun sendSwipe(direction: SwipeDirection, x: Float, y: Float) {
         if (!enabled) return
 
-        val message = ORMobileSwipeEvent(direction = direction.name.lowercase(), x = x, y = y, label = "Swipe")
+        val message = ORMobileSwipeEvent(
+            direction = direction.name.lowercase(),
+            x = x,
+            y = y,
+            label = "Swipe"
+        )
         MessageCollector.sendMessage(message)
     }
 
@@ -89,7 +94,7 @@ object Analytics {
     }
 }
 
-open class TrackingActivity : ComponentActivity() {
+open class TrackingActivity : AppCompatActivity() {
     private lateinit var gestureDetector: GestureDetector
     private val handler = Handler(Looper.getMainLooper())
     private var touchStart: PointF? = null
@@ -124,7 +129,12 @@ open class TrackingActivity : ComponentActivity() {
                 return true
             }
 
-            override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+            override fun onScroll(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                distanceX: Float,
+                distanceY: Float
+            ): Boolean {
                 if (!isScrolling) {
                     isScrolling = true
                 }
@@ -173,7 +183,12 @@ open class TrackingActivity : ComponentActivity() {
                 val child = root.getChildAt(i)
                 val location = IntArray(2)
                 child.getLocationOnScreen(location)
-                val rect = Rect(location[0], location[1], location[0] + child.width, location[1] + child.height)
+                val rect = Rect(
+                    location[0],
+                    location[1],
+                    location[0] + child.width,
+                    location[1] + child.height
+                )
                 if (rect.contains(x.toInt(), y.toInt())) {
                     val foundView = findViewAtPosition(child, x, y)
                     if (foundView != null) return foundView
@@ -367,3 +382,87 @@ class GlobalViewTracker : LifecycleEventObserver {
 //fun AppCompatActivity.observeLifecycleEvents() {
 //    lifecycle.addObserver(Analytics)
 //}
+
+fun setupGestureDetector(context: Context, rootView: View) {
+    val handler = Handler(Looper.getMainLooper())
+    val gd = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        var isScrolling = false
+        var swipeDirection: SwipeDirection? = null
+        var lastX: Float = 0f
+        var lastY: Float = 0f
+
+        val endOfScrollRunnable = Runnable {
+            isScrolling = false
+        }
+
+        override fun onSingleTapUp(e: MotionEvent): Boolean {
+            println("Single tap up >>>>>>>")
+            val clickedView = findViewAtPosition(rootView, e.x, e.y)
+            val description = getViewDescription(clickedView)
+
+            Analytics.sendClick(e, description)
+            return true
+        }
+
+        override fun onDown(e: MotionEvent): Boolean {
+            return true
+        }
+
+        override fun onScroll(
+            e1: MotionEvent?,
+            e2: MotionEvent,
+            distanceX: Float,
+            distanceY: Float
+        ): Boolean {
+            if (!isScrolling) {
+                isScrolling = true
+            }
+
+            swipeDirection = SwipeDirection.fromDistances(distanceX, distanceY)
+            lastX = e2.x
+            lastY = e2.y
+
+            handler.removeCallbacks(endOfScrollRunnable)
+            handler.postDelayed(endOfScrollRunnable, 200)
+            Analytics.sendSwipe(swipeDirection!!, lastX, lastY)
+            return true
+        }
+    })
+
+    rootView.setOnTouchListener { _, event ->
+        gd.onTouchEvent(event)
+        false
+    }
+}
+
+
+private fun findViewAtPosition(root: View, x: Float, y: Float): View? {
+    if (!View::class.java.isInstance(root) || !root.isShown) return null
+    if (root is ViewGroup) {
+        for (i in root.childCount - 1 downTo 0) {
+            val child = root.getChildAt(i)
+            val location = IntArray(2)
+            child.getLocationOnScreen(location)
+            val rect = Rect(
+                location[0],
+                location[1],
+                location[0] + child.width,
+                location[1] + child.height
+            )
+            if (rect.contains(x.toInt(), y.toInt())) {
+                val foundView = findViewAtPosition(child, x, y)
+                if (foundView != null) return foundView
+            }
+        }
+    }
+    return root
+}
+
+private fun getViewDescription(view: View?): String {
+    return when (view) {
+        is EditText -> view.text.toString()
+        is TextView -> view.text.toString()
+        is Button -> view.text.toString()
+        else -> view?.javaClass?.simpleName ?: "Unknown View"
+    }
+}

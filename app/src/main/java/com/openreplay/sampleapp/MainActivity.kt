@@ -1,6 +1,7 @@
 package com.openreplay.sampleapp
 
 import android.os.Bundle
+import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import androidx.navigation.findNavController
@@ -10,10 +11,11 @@ import androidx.navigation.ui.setupWithNavController
 import com.openreplay.sampleapp.databinding.ActivityMainBinding
 import com.openreplay.tracker.OpenReplay
 import com.openreplay.tracker.listeners.TrackingActivity
+import com.openreplay.tracker.listeners.setupGestureDetector
 import com.openreplay.tracker.models.OROptions
 
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : TrackingActivity() {
     private lateinit var binding: ActivityMainBinding
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -35,9 +37,12 @@ class MainActivity : AppCompatActivity() {
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
 
+//        val rootView = findViewById<View>(R.id.container)
+//        setupGestureDetector(this, rootView)
+
         OpenReplay.serverURL = BuildConfig.SERVER_URL
         OpenReplay.start(
-            applicationContext,
+            this,
             BuildConfig.PROJECT_KEY,
             OROptions.defaults,
             onStarted = {
