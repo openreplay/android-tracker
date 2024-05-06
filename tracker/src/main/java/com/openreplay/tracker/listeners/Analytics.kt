@@ -18,6 +18,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.TextView
+import androidx.activity.ComponentActivity
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.*
@@ -88,7 +89,7 @@ object Analytics {
     }
 }
 
-open class TrackingActivity : AppCompatActivity() {
+open class TrackingActivity : ComponentActivity() {
     private lateinit var gestureDetector: GestureDetector
     private val handler = Handler(Looper.getMainLooper())
     private var touchStart: PointF? = null
