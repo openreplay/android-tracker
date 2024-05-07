@@ -8,7 +8,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import android.os.Build
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -17,11 +16,9 @@ import com.google.gson.Gson
 import com.openreplay.tracker.listeners.Analytics
 import com.openreplay.tracker.listeners.Crash
 import com.openreplay.tracker.listeners.LogsListener
-import com.openreplay.tracker.listeners.NetworkListener
 import com.openreplay.tracker.listeners.ORGestureListener
 import com.openreplay.tracker.listeners.PerformanceListener
 import com.openreplay.tracker.listeners.sendNetworkMessage
-import com.openreplay.tracker.listeners.setupGestureDetector
 import com.openreplay.tracker.managers.*
 import com.openreplay.tracker.models.OROptions
 import com.openreplay.tracker.models.SessionRequest
@@ -103,7 +100,7 @@ object OpenReplay {
     }
 
     private fun startSession(onStarted: () -> Unit) {
-        // setupGestureDetector(appContext!!)
+        setupGestureDetector(appContext!!)
         SessionRequest.create(appContext!!, false) { sessionResponse ->
             sessionResponse ?: return@create println("Openreplay: no response from /start request")
             MessageCollector.start()
