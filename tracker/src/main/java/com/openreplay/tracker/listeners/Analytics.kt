@@ -501,55 +501,119 @@ class GlobalViewTracker : LifecycleEventObserver {
 //    lifecycle.addObserver(Analytics)
 //}
 
-fun setupGestureDetector(context: Context, rootView: View) {
+fun getGestureDetector(context: Context, rootView: View): GestureDetector {
     val handler = Handler(Looper.getMainLooper())
-    val gd = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
-        var isScrolling = false
-        var swipeDirection: SwipeDirection? = null
-        var lastX: Float = 0f
-        var lastY: Float = 0f
 
-        val endOfScrollRunnable = Runnable {
-            isScrolling = false
-        }
+    val gestureDetector =
+        GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+            var isScrolling = false
+            var swipeDirection: SwipeDirection? = null
+            var lastX: Float = 0f
+            var lastY: Float = 0f
 
-        override fun onSingleTapUp(e: MotionEvent): Boolean {
-            println("Single tap up >>>>>>>")
-            val clickedView = findViewAtPosition(rootView, e.x, e.y)
-            val description = getViewDescription(clickedView)
-
-            Analytics.sendClick(e, description)
-            return true
-        }
-
-        override fun onDown(e: MotionEvent): Boolean {
-            return true
-        }
-
-        override fun onScroll(
-            e1: MotionEvent?,
-            e2: MotionEvent,
-            distanceX: Float,
-            distanceY: Float
-        ): Boolean {
-            if (!isScrolling) {
-                isScrolling = true
+            val endOfScrollRunnable = Runnable {
+                isScrolling = false
             }
 
-            swipeDirection = SwipeDirection.fromDistances(distanceX, distanceY)
-            lastX = e2.x
-            lastY = e2.y
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
+                println("Single tap up >>>>>>>")
+                val clickedView = findViewAtPosition(rootView, e.x, e.y)
+                val description = getViewDescription(clickedView)
+                Analytics.sendClick(e, description)
+                return true
+            }
 
-            handler.removeCallbacks(endOfScrollRunnable)
-            handler.postDelayed(endOfScrollRunnable, 200)
-            Analytics.sendSwipe(swipeDirection!!, lastX, lastY)
-            return true
+            override fun onDown(e: MotionEvent): Boolean {
+                return true
+            }
+
+            override fun onScroll(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                distanceX: Float,
+                distanceY: Float
+            ): Boolean {
+                if (!isScrolling) {
+                    isScrolling = true
+                }
+
+                swipeDirection = SwipeDirection.fromDistances(distanceX, distanceY)
+                lastX = e2.x
+                lastY = e2.y
+
+                handler.removeCallbacks(endOfScrollRunnable)
+                handler.postDelayed(endOfScrollRunnable, 200)
+                return true
+            }
+        })
+
+    return gestureDetector
+}
+
+fun View.addTracking() {
+    val gd = getGestureDetector(context, this)
+
+    setOnTouchListener { _, event ->
+        if (gd.onTouchEvent(event)) {
+            if (event.action == MotionEvent.ACTION_UP) performClick() // Calls performClick() when the user lifts their finger
+            true
+        } else {
+            false
         }
-    })
+    }
+}
+
+fun setupGestureDetector(context: Context, rootView: View) {
+    val handler = Handler(Looper.getMainLooper())
+
+    val gestureDetector =
+        GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+            var isScrolling = false
+            var swipeDirection: SwipeDirection? = null
+            var lastX: Float = 0f
+            var lastY: Float = 0f
+
+            val endOfScrollRunnable = Runnable {
+                isScrolling = false
+            }
+
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
+                println("Single tap up >>>>>>>")
+                val clickedView = findViewAtPosition(rootView, e.x, e.y)
+                val description = getViewDescription(clickedView)
+                Analytics.sendClick(e, description)
+                return true
+            }
+
+            override fun onDown(e: MotionEvent): Boolean {
+                return true
+            }
+
+            override fun onScroll(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                distanceX: Float,
+                distanceY: Float
+            ): Boolean {
+                if (!isScrolling) {
+                    isScrolling = true
+                }
+
+                swipeDirection = SwipeDirection.fromDistances(distanceX, distanceY)
+                lastX = e2.x
+                lastY = e2.y
+
+                handler.removeCallbacks(endOfScrollRunnable)
+                handler.postDelayed(endOfScrollRunnable, 200)
+                return true
+            }
+        })
 
     rootView.setOnTouchListener { _, event ->
-        gd.onTouchEvent(event)
-        false
+        println("Touch event: ${event.actionMasked}")
+        gestureDetector.onTouchEvent(event)
+
+        rootView.performClick()
     }
 }
 
@@ -582,5 +646,77 @@ private fun getViewDescription(view: View?): String {
         is TextView -> view.text.toString()
         is Button -> view.text.toString()
         else -> view?.javaClass?.simpleName ?: "Unknown View"
+    }
+}
+
+
+class ORGestureListener(private val rootView: View) : GestureDetector.SimpleOnGestureListener() {
+    private val handler = Handler(Looper.getMainLooper())
+    private var isScrolling = false
+    private var swipeDirection: SwipeDirection? = null
+    private var lastX: Float = 0f
+    private var lastY: Float = 0f
+
+    private val endOfScrollRunnable = Runnable {
+        isScrolling = false
+        swipeDirection = null
+    }
+
+    override fun onSingleTapUp(e: MotionEvent): Boolean {
+        println("Single tap up >>>>>>>")
+        val clickedView = findViewAtPosition(rootView, e.x, e.y)
+        Analytics.sendClick(e, getViewDescription(clickedView))
+        return true
+    }
+
+    override fun onDown(e: MotionEvent): Boolean {
+        return true
+    }
+
+    override fun onScroll(
+        e1: MotionEvent?,
+        e2: MotionEvent,
+        distanceX: Float,
+        distanceY: Float
+    ): Boolean {
+        if (!isScrolling) {
+            isScrolling = true
+        }
+        swipeDirection = SwipeDirection.fromDistances(distanceX, distanceY)
+        lastX = e2.x
+        lastY = e2.y
+
+        handler.removeCallbacks(endOfScrollRunnable)
+        handler.postDelayed(endOfScrollRunnable, 200)
+
+        Analytics.sendSwipe(swipeDirection!!, lastX, lastY)
+        return true
+    }
+
+    private fun findViewAtPosition(root: View, x: Float, y: Float): View? {
+        if (!root.isShown) return null
+        if (root is ViewGroup) {
+            for (i in root.childCount - 1 downTo 0) {
+                val child = root.getChildAt(i)
+                if (isPointInsideViewBounds(child, x, y)) {
+                    val foundView = findViewAtPosition(child, x - child.x, y - child.y)
+                    if (foundView != null) return foundView
+                }
+            }
+        }
+        return if (isPointInsideViewBounds(root, x, y)) root else null
+    }
+
+    private fun isPointInsideViewBounds(view: View, x: Float, y: Float): Boolean {
+        return x >= 0 && y >= 0 && x < view.width && y < view.height
+    }
+
+    private fun getViewDescription(view: View?): String {
+        return when (view) {
+            is EditText -> view.text.toString()
+            is TextView -> view.text.toString()
+            is Button -> view.text.toString()
+            else -> view?.javaClass?.simpleName ?: "Unknown View"
+        }
     }
 }

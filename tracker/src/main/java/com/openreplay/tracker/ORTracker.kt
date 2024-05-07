@@ -1,6 +1,7 @@
 package com.openreplay.tracker
 
 import NetworkManager
+import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -9,14 +10,18 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.view.View
 import com.google.gson.Gson
 import com.openreplay.tracker.listeners.Analytics
 import com.openreplay.tracker.listeners.Crash
 import com.openreplay.tracker.listeners.LogsListener
 import com.openreplay.tracker.listeners.NetworkListener
+import com.openreplay.tracker.listeners.ORGestureListener
 import com.openreplay.tracker.listeners.PerformanceListener
 import com.openreplay.tracker.listeners.sendNetworkMessage
+import com.openreplay.tracker.listeners.setupGestureDetector
 import com.openreplay.tracker.managers.*
 import com.openreplay.tracker.models.OROptions
 import com.openreplay.tracker.models.SessionRequest
@@ -38,6 +43,7 @@ object OpenReplay {
     var sessionStartTs: Long = 0
     var bufferingMode = false
     var options: OROptions = OROptions.defaults
+
     var serverURL: String
         get() = NetworkManager.baseUrl
         set(value) {
@@ -45,6 +51,7 @@ object OpenReplay {
         }
 
     private var appContext: Context? = null
+    private var gestureDetector: GestureDetector? = null
 
 
     fun start(context: Context, projectKey: String, options: OROptions, onStarted: () -> Unit) {
@@ -96,6 +103,7 @@ object OpenReplay {
     }
 
     private fun startSession(onStarted: () -> Unit) {
+        // setupGestureDetector(appContext!!)
         SessionRequest.create(appContext!!, false) { sessionResponse ->
             sessionResponse ?: return@create println("Openreplay: no response from /start request")
             MessageCollector.start()
@@ -234,6 +242,16 @@ object OpenReplay {
     fun eventStr(name: String, jsonPayload: String) {
         val message = ORMobileEvent(name, payload = jsonPayload)
         MessageCollector.sendMessage(message)
+    }
+
+    fun setupGestureDetector(context: Context) {
+        val rootView = (context as Activity).window.decorView.rootView
+        val gestureListener = ORGestureListener(rootView)
+        this.gestureDetector = GestureDetector(context, gestureListener)
+    }
+
+    fun onTouchEvent(event: MotionEvent) {
+        this.gestureDetector?.onTouchEvent(event)
     }
 }
 

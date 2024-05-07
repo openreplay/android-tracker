@@ -1,7 +1,8 @@
 package com.openreplay.sampleapp
 
 import android.os.Bundle
-import android.view.View
+import android.view.GestureDetector
+import android.view.MotionEvent
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import androidx.navigation.findNavController
@@ -10,25 +11,20 @@ import androidx.navigation.ui.setupActionBarWithNavController
 import androidx.navigation.ui.setupWithNavController
 import com.openreplay.sampleapp.databinding.ActivityMainBinding
 import com.openreplay.tracker.OpenReplay
-import com.openreplay.tracker.listeners.TrackingActivity
-import com.openreplay.tracker.listeners.setupGestureDetector
+import com.openreplay.tracker.listeners.ORGestureListener
 import com.openreplay.tracker.models.OROptions
 
 
-class MainActivity : TrackingActivity() {
+class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
         val navView: BottomNavigationView = binding.navView
-
         val navController = findNavController(R.id.nav_host_fragment_activity_main)
-        // Passing each menu ID as a set of Ids because each
-        // menu should be considered as top level destinations.
         val appBarConfiguration = AppBarConfiguration(
             setOf(
                 R.id.navigation_home, R.id.navigation_dashboard, R.id.navigation_notifications
@@ -37,8 +33,7 @@ class MainActivity : TrackingActivity() {
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
 
-//        val rootView = findViewById<View>(R.id.container)
-//        setupGestureDetector(this, rootView)
+        OpenReplay.setupGestureDetector(this)
 
         OpenReplay.serverURL = BuildConfig.SERVER_URL
         OpenReplay.start(
@@ -50,5 +45,13 @@ class MainActivity : TrackingActivity() {
                 OpenReplay.setUserID("Library")
             }
         )
+    }
+
+
+    override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
+        ev?.let {
+            OpenReplay.onTouchEvent(it)
+        }
+        return super.dispatchTouchEvent(ev)
     }
 }
