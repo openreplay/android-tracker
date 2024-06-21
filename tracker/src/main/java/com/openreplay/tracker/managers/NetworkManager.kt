@@ -22,7 +22,7 @@ object NetworkManager {
     private const val IMAGES_URL = "/v1/mobile/images"
     private const val CONDITIONS = "/v1/mobile/conditions"
 
-    var baseUrl = "https://ee.openreplay.tools/ingest"
+    var baseUrl = "https://api.openreplay.com/ingest"
     var sessionId: String? = null
     var projectId: String? = null
     private var token: String? = null
