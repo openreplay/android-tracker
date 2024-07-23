@@ -34,7 +34,6 @@ class MainActivity : AppCompatActivity() {
         navView.setupWithNavController(navController)
 
         OpenReplay.setupGestureDetector(this)
-
         OpenReplay.serverURL = BuildConfig.SERVER_URL
         OpenReplay.start(
             this,

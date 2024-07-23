@@ -12,6 +12,10 @@ import android.os.Build
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.AbstractComposeView
+import androidx.compose.ui.platform.LocalContext
 import com.google.gson.Gson
 import com.openreplay.tracker.listeners.Analytics
 import com.openreplay.tracker.listeners.Crash
@@ -241,10 +245,59 @@ object OpenReplay {
         MessageCollector.sendMessage(message)
     }
 
+//    fun setupGestureDetector(context: Context) {
+//        val rootView = (context as Activity).window.decorView.rootView
+//        val gestureListener = ORGestureListener(rootView)
+//        this.gestureDetector = GestureDetector(context, gestureListener)
+//    }
+
+//    @Composable
+//    fun GestureDetectorBox(onGestureDetected: () -> Unit) {
+//        val context = LocalContext.current
+//        setupGestureDetector(context) {
+//            onGestureDetected()
+//        }
+//
+//        Box(
+//            modifier = Modifier
+//                .fillMaxSize()
+//                .pointerInput(Unit) {
+//                    detectTapGestures(
+//                        onTap = {
+//                            onGestureDetected()
+//                        }
+//                    )
+//                }
+//        ) {
+//            Text(text = "Tap me")
+//        }
+//    }
+
     fun setupGestureDetector(context: Context) {
-        val rootView = (context as Activity).window.decorView.rootView
+        val activity = context as Activity
+        val rootView = activity.window.decorView.rootView
+
         val gestureListener = ORGestureListener(rootView)
-        this.gestureDetector = GestureDetector(context, gestureListener)
+        val gestureDetector = GestureDetector(context, gestureListener)
+
+        // Set up gesture detection for legacy Android views
+        rootView.setOnTouchListener { v, event ->
+            gestureDetector.onTouchEvent(event)
+        }
+
+        // Handle Jetpack Compose views
+        if (rootView is ViewGroup) {
+            println("jetpack view listener")
+            for (i in 0 until rootView.childCount) {
+                val child = rootView.getChildAt(i)
+                if (child is AbstractComposeView) {
+                    println("child listener")
+                    child.setOnTouchListener { v, event ->
+                        gestureDetector.onTouchEvent(event)
+                    }
+                }
+            }
+        }
     }
 
     fun onTouchEvent(event: MotionEvent) {

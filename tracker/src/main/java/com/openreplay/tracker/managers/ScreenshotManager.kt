@@ -1,16 +1,14 @@
 package com.openreplay.tracker.managers
 
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
 import NetworkManager
 import android.app.Activity
 import android.content.Context
 import android.graphics.*
-import android.util.Log
 import android.view.View
+import android.view.ViewGroup
+import androidx.compose.ui.platform.AbstractComposeView
 import com.openreplay.tracker.OpenReplay
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.*
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream
@@ -36,15 +34,14 @@ object ScreenshotManager {
 
     fun setSettings(settings: Pair<Int, Int>) {
         val (_, quality) = settings
-        this.quality = quality
+        ScreenshotManager.quality = quality
     }
 
     fun start(context: Context, startTs: Long) {
-        this.appContext = context
+        appContext = context
         firstTs = startTs
         startCapturing(1000 / OpenReplay.options.fps.toLong())
     }
-
 
     private fun startCapturing(intervalMillis: Long = 1000) {
         stopCapturing()
@@ -60,18 +57,13 @@ object ScreenshotManager {
     }
 
     private fun captureScreenshot() {
-        val view = (this.appContext as Activity).window.decorView.rootView
+        val activity = appContext as? Activity ?: return
+        val rootView = activity.window.decorView.rootView
 
-        (this.appContext as Activity).runOnUiThread {
-            val bitmap = viewToBitmap(view, view.width, view.height)
+        activity.runOnUiThread {
+            val bitmap = viewToBitmap(rootView, rootView.width, rootView.height)
             compressAndSend(bitmap)
         }
-    }
-
-    private val maskPaint = Paint().apply {
-        style = Paint.Style.FILL
-        val patternBitmap = createCrossStripedPatternBitmap()
-        shader = BitmapShader(patternBitmap, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
     }
 
     private fun viewToBitmap(view: View, width: Int, height: Int): Bitmap {
@@ -79,10 +71,18 @@ object ScreenshotManager {
         val canvas = Canvas(bitmap)
         view.draw(canvas)
 
+        // Handle Jetpack Compose views
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                val child = view.getChildAt(i)
+                if (child is AbstractComposeView) {
+                    child.draw(canvas)
+                }
+            }
+        }
 
         // Draw masks over sanitized elements
         sanitizedElements.forEach { sanitizedView ->
-//            Log.d("ScreenshotManager", "Sanitized view: ${sanitizedView.visibility}")
             if (sanitizedView.visibility == View.VISIBLE && sanitizedView.isAttachedToWindow) {
                 val location = IntArray(2)
                 sanitizedView.getLocationInWindow(location)
@@ -98,22 +98,29 @@ object ScreenshotManager {
                 canvas.restore()
             }
         }
+
         return bitmap
     }
 
+    private val maskPaint = Paint().apply {
+        style = Paint.Style.FILL
+        val patternBitmap = createCrossStripedPatternBitmap()
+        shader = BitmapShader(patternBitmap, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
+    }
+
     private fun createCrossStripedPatternBitmap(): Bitmap {
-        val patternSize = 80 // This is the size of the square pattern
+        val patternSize = 80
         val patternBitmap = Bitmap.createBitmap(patternSize, patternSize, Bitmap.Config.ARGB_8888)
         val patternCanvas = Canvas(patternBitmap)
         val paint = Paint().apply {
-            color = Color.DKGRAY // Color of the stripes
+            color = Color.DKGRAY
             style = Paint.Style.FILL
         }
 
         patternCanvas.drawColor(Color.WHITE)
 
-        val stripeWidth = 20f // Width of the stripes
-        val gap = stripeWidth / 4 // Gap between stripes
+        val stripeWidth = 20f
+        val gap = stripeWidth / 4
         for (i in -patternSize until patternSize * 2 step (stripeWidth + gap).toInt()) {
             patternCanvas.drawLine(i.toFloat(), -gap, i.toFloat() + patternSize, patternSize.toFloat() + gap, paint)
         }
@@ -142,7 +149,7 @@ object ScreenshotManager {
             bitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
             val screenshotData = outputStream.toByteArray()
 
-            // saveToLocalFilesystem(appContext, screenshotData, "screenshot-${System.currentTimeMillis()}.jpg")
+//            saveToLocalFilesystem(appContext, screenshotData, "screenshot-${System.currentTimeMillis()}.jpg")
             screenshots.add(Pair(screenshotData, System.currentTimeMillis()))
             sendScreenshots()
         }
@@ -200,6 +207,7 @@ object ScreenshotManager {
             }
 
             val gzData = combinedData.toByteArray()
+
             try {
                 MessageCollector.sendImagesBatch(gzData, archiveName)
                 screenshots.clear()

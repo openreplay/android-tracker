@@ -138,7 +138,7 @@ object NetworkManager {
     }
 
     fun sendLateMessage(content: ByteArray, completion: (Boolean) -> Unit) {
-        println(">>>sending late messages")
+//        println(">>>sending late messages")
         val token = UserDefaults.lastToken ?: run {
             println("! No last token found")
             completion(false)
@@ -177,9 +177,9 @@ object NetworkManager {
             method = "POST", path = IMAGES_URL, body = requestBodyBuilder.build()
         ).newBuilder().addHeader("Authorization", "Bearer $token").build()
 
+
         callAPI(request, onSuccess = {
             completion(true)
-            println(">>>>>> sending ${request.body?.contentLength()} bytes")
         }, onError = {
             completion(false)
         })
@@ -212,8 +212,6 @@ object NetworkManager {
 
     private fun appendLocalFile(data: ByteArray) {
         if (OpenReplay.options.debugLogs) {
-            println("appendInFile ${data.size} bytes")
-
             val filePath = "/Users/shekarsiri/Desktop/session.dat" // TODO fix this
             try {
                 File(filePath).apply {
@@ -227,10 +225,8 @@ object NetworkManager {
                         stream.write(data)
                     }
                 }
-                println("Data successfully appended to file.")
             } catch (e: IOException) {
                 e.printStackTrace()
-                println("Failed to append data to file.")
             }
         }
     }

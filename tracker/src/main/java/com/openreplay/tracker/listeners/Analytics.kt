@@ -18,17 +18,21 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.TextView
-import androidx.activity.ComponentActivity
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.widget.doAfterTextChanged
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.lifecycle.*
-import com.openreplay.tracker.OpenReplay
-import com.openreplay.tracker.managers.DebugUtils
 import com.openreplay.tracker.managers.MessageCollector
 import com.openreplay.tracker.managers.ScreenshotManager
 import com.openreplay.tracker.models.script.*
-import kotlin.math.abs
-import kotlin.math.atan2
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.composed
+
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.runtime.*
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.input.TextFieldValue
 
 enum class SwipeDirection {
     LEFT, RIGHT, UP, DOWN, UNDEFINED;
@@ -58,7 +62,6 @@ object Analytics {
     fun sendClick(ev: MotionEvent, label: String? = null) {
         if (!enabled) return
 
-
         val message = ORMobileClickEvent(label = label ?: "Button", x = ev.x, y = ev.y)
         MessageCollector.sendMessage(message)
     }
@@ -67,10 +70,18 @@ object Analytics {
         if (!enabled) return
 
         val message = ORMobileSwipeEvent(
-            direction = direction.name.lowercase(),
-            x = x,
-            y = y,
-            label = "Swipe"
+            direction = direction.name.lowercase(), x = x, y = y, label = "Swipe"
+        )
+        MessageCollector.sendMessage(message)
+    }
+
+    fun sendTextInput(value: String, label: String?, masked: Boolean = false) {
+        if (!enabled) return
+
+        val message = ORMobileInputEvent(
+            value = value,
+            valueMasked = masked,
+            label = label ?: "Input"
         )
         MessageCollector.sendMessage(message)
     }
@@ -130,10 +141,7 @@ open class TrackingActivity : AppCompatActivity() {
             }
 
             override fun onScroll(
-                e1: MotionEvent?,
-                e2: MotionEvent,
-                distanceX: Float,
-                distanceY: Float
+                e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float
             ): Boolean {
                 if (!isScrolling) {
                     isScrolling = true
@@ -184,10 +192,7 @@ open class TrackingActivity : AppCompatActivity() {
                 val location = IntArray(2)
                 child.getLocationOnScreen(location)
                 val rect = Rect(
-                    location[0],
-                    location[1],
-                    location[0] + child.width,
-                    location[1] + child.height
+                    location[0], location[1], location[0] + child.width, location[1] + child.height
                 )
                 if (rect.contains(x.toInt(), y.toInt())) {
                     val foundView = findViewAtPosition(child, x, y)
@@ -405,10 +410,7 @@ class ORGestureListener(private val rootView: View) : GestureDetector.SimpleOnGe
     }
 
     override fun onScroll(
-        e1: MotionEvent?,
-        e2: MotionEvent,
-        distanceX: Float,
-        distanceY: Float
+        e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float
     ): Boolean {
         if (!isScrolling) {
             isScrolling = true
@@ -449,3 +451,65 @@ class ORGestureListener(private val rootView: View) : GestureDetector.SimpleOnGe
         }
     }
 }
+
+fun Modifier.trackTouchEvents(label: String? = "Unknown"): Modifier {
+    var initialX = 0f
+    var initialY = 0f
+    var currentX = 0f
+    var currentY = 0f
+    return this.pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent()
+                event.changes.forEach { change ->
+                    if (change.pressed) {
+//                        position = "X: ${change.position.x}, Y: ${change.position.y}"
+                        println("$label X: ${change.position.x}, Y: ${change.position.y}")
+                        change.consume()
+                        Analytics.sendClick(
+                            MotionEvent.obtain(
+                                0,
+                                0,
+                                MotionEvent.ACTION_UP,
+                                change.position.x,
+                                change.position.y,
+                                0
+                            ), label
+                        )
+                    }
+                }
+            }
+        }
+    }.pointerInput(Unit) {
+        detectDragGestures(onDragStart = { offset ->
+            initialX = offset.x
+            initialY = offset.y
+            println("onDragStart at ${offset.x}, ${offset.y}")
+        }, onDragEnd = {
+            val distanceX = currentX - initialX
+            val distanceY = currentY - initialY
+            val direction = SwipeDirection.fromDistances(distanceX, distanceY)
+            println("onDragEnd with swipe direction: $direction at ($currentX, $currentY)")
+            Analytics.sendSwipe(direction, currentX, currentY)
+        }, onDragCancel = {
+            println("onDragCancel")
+        }, onDrag = { change, _ ->
+            currentX = change.position.x
+            currentY = change.position.y
+        })
+    }
+}
+
+fun Modifier.trackTextInputChanges(
+    label: String,
+    value: String? = null,
+    isMasked: Boolean = false
+): Modifier {
+    return this.onFocusChanged {
+        if (!it.isFocused) {
+            Analytics.sendTextInput(value ?: "", label, isMasked)
+        }
+    }
+}
+
+
