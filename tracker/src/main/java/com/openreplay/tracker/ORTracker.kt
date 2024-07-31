@@ -13,9 +13,15 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.AbstractComposeView
+import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
 import com.google.gson.Gson
 import com.openreplay.tracker.listeners.Analytics
 import com.openreplay.tracker.listeners.Crash
@@ -316,4 +322,67 @@ fun getCaptureSettings(fps: Int, quality: RecordingQuality): Pair<Int, Int> {
     }
 
     return Pair(captureRate, imgCompression)
+}
+
+class SanitizableViewGroup(context: Context) : ViewGroup(context) {
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        var maxHeight = 0
+        var maxWidth = 0
+
+        for (i in 0 until childCount) {
+            val child = getChildAt(i)
+            measureChild(child, widthMeasureSpec, heightMeasureSpec)
+            maxWidth = maxOf(maxWidth, child.measuredWidth)
+            maxHeight = maxOf(maxHeight, child.measuredHeight)
+        }
+
+        val width = resolveSize(maxWidth, widthMeasureSpec)
+        val height = resolveSize(maxHeight, heightMeasureSpec)
+        setMeasuredDimension(width, height)
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        for (i in 0 until childCount) {
+            val child = getChildAt(i)
+            child.layout(0, 0, child.measuredWidth, child.measuredHeight)
+        }
+    }
+}
+
+
+@Composable
+fun Sanitized(
+    content: @Composable () -> Unit
+) {
+    val context = LocalContext.current
+    AndroidView(
+        factory = {
+            SanitizableViewGroup(context).apply {
+                // Add a FrameLayout to hold the composable content
+                val frameLayout = FrameLayout(context)
+                addView(frameLayout)
+
+                // Set LayoutParams for the frame layout
+                frameLayout.layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            }
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .wrapContentHeight(),
+        update = { viewGroup ->
+            // Update the content inside the frame layout
+            val frameLayout = viewGroup.getChildAt(0) as FrameLayout
+            frameLayout.removeAllViews()
+
+            ComposeView(context).apply {
+                setContent {
+                    content()
+                }
+                frameLayout.addView(this)
+            }
+        }
+    )
 }

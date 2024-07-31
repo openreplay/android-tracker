@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.androidLibrary)
     alias(libs.plugins.jetbrainsKotlinAndroid)
+    alias(libs.plugins.compose)
     id("maven-publish")
 }
 
@@ -36,6 +37,10 @@ android {
         singleVariant("release") {
             withSourcesJar()
         }
+    }
+
+    buildFeatures {
+        compose = true
     }
 }
 

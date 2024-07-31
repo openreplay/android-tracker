@@ -42,6 +42,9 @@ class MainActivity : AppCompatActivity() {
             onStarted = {
                 println("OpenReplay Started")
                 OpenReplay.setUserID("Library")
+
+                data class User(val name: String, val age: Int)
+                OpenReplay.event("Test Event", User("John", 25))
             }
         )
     }

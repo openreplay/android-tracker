@@ -32,7 +32,9 @@ import androidx.compose.ui.composed
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.*
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.debugInspectorInfo
+import androidx.compose.ui.platform.testTag
 
 enum class SwipeDirection {
     LEFT, RIGHT, UP, DOWN, UNDEFINED;
@@ -511,5 +513,9 @@ fun Modifier.trackTextInputChanges(
         }
     }
 }
+
+fun Modifier.sanitized(): Modifier = this.then(
+    Modifier.testTag("sanitized")
+)
 
 

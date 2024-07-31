@@ -7,7 +7,9 @@ import android.graphics.*
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.ui.platform.AbstractComposeView
+import androidx.compose.ui.platform.ComposeView
 import com.openreplay.tracker.OpenReplay
+import com.openreplay.tracker.SanitizableViewGroup
 import kotlinx.coroutines.*
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
@@ -94,10 +96,67 @@ object ScreenshotManager {
                 // Draw the striped mask over the sanitized view
                 canvas.save()
                 canvas.translate(x.toFloat(), y.toFloat())
-                canvas.drawRect(0f, 0f, sanitizedView.width.toFloat(), sanitizedView.height.toFloat(), maskPaint)
+                canvas.drawRect(
+                    0f,
+                    0f,
+                    sanitizedView.width.toFloat(),
+                    sanitizedView.height.toFloat(),
+                    maskPaint
+                )
                 canvas.restore()
             }
         }
+
+        fun iterateComposeView(vv: View) {
+            if (vv is ViewGroup) {
+                for (i in 0 until vv.childCount) {
+                    val child = vv.getChildAt(i)
+                    println("iterateComposeView child: ${child::class.java.name}")
+
+                    if (child is SanitizableViewGroup) {
+                        println("SanitizableViewGroup")
+                        val location = IntArray(2)
+                        child.getLocationInWindow(location)
+                        val rootViewLocation = IntArray(2)
+                        view.getLocationInWindow(rootViewLocation)
+                        val x = location[0] - rootViewLocation[0]
+                        val y = location[1] - rootViewLocation[1]
+
+                        canvas.save()
+                        canvas.translate(x.toFloat(), y.toFloat())
+                        canvas.drawRect(
+                            0f,
+                            0f,
+                            child.width.toFloat(),
+                            child.height.toFloat(),
+                            maskPaint
+                        )
+                        canvas.restore()
+                    } else if (child is ViewGroup) {
+                        iterateComposeView(child)
+                    }
+                }
+            }
+        }
+
+        fun iterateViewGroup(viewGroup: ViewGroup) {
+            for (i in 0 until viewGroup.childCount) {
+                val child = viewGroup.getChildAt(i)
+                if (child is ViewGroup) {
+                    iterateViewGroup(child)
+                }
+
+                if (child is ComposeView) {
+                    iterateComposeView(child)
+                }
+
+                if (child is SanitizableViewGroup) {
+                    iterateComposeView(child)
+                }
+            }
+        }
+
+        iterateViewGroup(view as ViewGroup)
 
         return bitmap
     }
@@ -122,13 +181,25 @@ object ScreenshotManager {
         val stripeWidth = 20f
         val gap = stripeWidth / 4
         for (i in -patternSize until patternSize * 2 step (stripeWidth + gap).toInt()) {
-            patternCanvas.drawLine(i.toFloat(), -gap, i.toFloat() + patternSize, patternSize.toFloat() + gap, paint)
+            patternCanvas.drawLine(
+                i.toFloat(),
+                -gap,
+                i.toFloat() + patternSize,
+                patternSize.toFloat() + gap,
+                paint
+            )
         }
 
         patternCanvas.rotate(90f, patternSize / 2f, patternSize / 2f)
 
         for (i in -patternSize until patternSize * 2 step (stripeWidth + gap).toInt()) {
-            patternCanvas.drawLine(i.toFloat(), -gap, i.toFloat() + patternSize, patternSize.toFloat() + gap, paint)
+            patternCanvas.drawLine(
+                i.toFloat(),
+                -gap,
+                i.toFloat() + patternSize,
+                patternSize.toFloat() + gap,
+                paint
+            )
         }
 
         return patternBitmap
