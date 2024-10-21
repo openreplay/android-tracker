@@ -14,6 +14,7 @@ import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import com.openreplay.tracker.OpenReplay
 import com.openreplay.tracker.SanitizableViewGroup
+import com.openreplay.tracker.models.RecordingFrequency
 import kotlinx.coroutines.*
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
@@ -46,10 +47,10 @@ object ScreenshotManager {
     fun start(context: Context, startTs: Long) {
         appContext = context
         firstTs = startTs
-        startCapturing(300 / OpenReplay.options.fps.toLong())
+        startCapturing(OpenReplay.options.screenshotFrequency.millis / OpenReplay.options.fps.toLong())
     }
 
-    private fun startCapturing(intervalMillis: Long = 300) {
+    private fun startCapturing(intervalMillis: Long = RecordingFrequency.Low.millis) {
         stopCapturing()
         timer = fixedRateTimer("screenshotTimer", false, 0L, intervalMillis) {
             captureScreenshot()
