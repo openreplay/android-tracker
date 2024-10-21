@@ -4,6 +4,10 @@ import NetworkManager
 import android.app.Activity
 import android.content.Context
 import android.graphics.*
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.view.PixelCopy
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.ui.platform.AbstractComposeView
@@ -42,10 +46,10 @@ object ScreenshotManager {
     fun start(context: Context, startTs: Long) {
         appContext = context
         firstTs = startTs
-        startCapturing(1000 / OpenReplay.options.fps.toLong())
+        startCapturing(300 / OpenReplay.options.fps.toLong())
     }
 
-    private fun startCapturing(intervalMillis: Long = 1000) {
+    private fun startCapturing(intervalMillis: Long = 300) {
         stopCapturing()
         timer = fixedRateTimer("screenshotTimer", false, 0L, intervalMillis) {
             captureScreenshot()
@@ -63,8 +67,31 @@ object ScreenshotManager {
         val rootView = activity.window.decorView.rootView
 
         activity.runOnUiThread {
-            val bitmap = viewToBitmap(rootView, rootView.width, rootView.height)
-            compressAndSend(bitmap)
+            compressAndSendView(rootView)
+        }
+    }
+
+    private fun compressAndSendView(view: View) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // New version of Android, should use PixelCopy
+            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            val location = IntArray(2)
+            view.getLocationInWindow(location)
+
+            PixelCopy.request(
+                (appContext as Activity).window,
+                Rect(location[0], location[1], location[0] + view.width, location[1] + view.height),
+                bitmap,
+                {
+                    if (it == PixelCopy.SUCCESS) {
+                        compressAndSend(bitmap)
+                    }
+                },
+                Handler(Looper.getMainLooper())
+            )
+        } else {
+            // Old version can keep using view.draw
+            compressAndSend(viewToBitmap(view, view.width, view.height))
         }
     }
 
