@@ -18,7 +18,7 @@ class OROptions(
     val debugLogs: Boolean = false,
     val debugImages: Boolean = false,
     val fps: Int = 1,
-    val screenshotFrequency: RecordingFrequency = RecordingFrequency.Low,
+    val screenshotFrequency: RecordingFrequency = RecordingFrequency.Standard,
     val screenshotQuality: RecordingQuality = RecordingQuality.Low,
     val pkgVersion: String = "1.0.10"
 ) {

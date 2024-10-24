@@ -1,5 +1,6 @@
 package com.openreplay.tracker.managers
 
+import NetworkManager
 import android.os.Handler
 import com.openreplay.tracker.OpenReplay
 import com.openreplay.tracker.models.ORMessage
@@ -11,7 +12,6 @@ import java.io.IOException
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
-import kotlin.collections.ArrayList
 
 data class BatchArch(
     var name: String,
@@ -43,6 +43,7 @@ object MessageCollector {
     private val messagesWaitingBackup = mutableListOf<ByteArray>()
     private var nextMessageIndex = 0
     private var sendingLastMessages = false
+    private var sendingLastImages = false
     private val maxMessagesSize = 500_000
     private var lateMessagesFile: File? = null
     private var sendInterval: Handler? = null
@@ -72,8 +73,11 @@ object MessageCollector {
     fun start() {
         this.lateMessagesFile = OpenReplay.getLateMessagesFile()
 
-        sendIntervalFuture = executorService.scheduleAtFixedRate({
-            flush()
+        sendIntervalFuture = executorService.scheduleWithFixedDelay({
+            executorService.execute {
+                flushMessages()
+                flushImages()
+            }
         }, 0, 5, TimeUnit.SECONDS)
 
         if (lateMessagesFile?.exists() == true) {
@@ -83,13 +87,6 @@ object MessageCollector {
                     lateMessagesFile!!.delete()
                 }
             }
-        }
-    }
-
-    private fun flush() {
-        executorService.execute {
-            flushMessages()
-            flushImages()
         }
     }
 
@@ -152,10 +149,19 @@ object MessageCollector {
             imagesSending.add(images)
 
             DebugUtils.log("Sending images ${images.name} ${images.data.size}")
-            NetworkManager.sendImages(OpenReplay.projectKey!!, images.data, images.name) { success ->
+            NetworkManager.sendImages(
+                OpenReplay.projectKey!!,
+                images.data,
+                images.name
+            ) { success ->
                 imagesSending.removeAll { it.name == images.name }
                 if (!success) {
-                    imagesWaiting.add(0, images) // Re-add to the start of the queue if not successful
+                    imagesWaiting.add(
+                        0,
+                        images
+                    ) // Re-add to the start of the queue if not successful
+                } else if (sendingLastImages) {
+                    sendingLastImages = false
                 }
             }
         }
@@ -169,7 +175,9 @@ object MessageCollector {
         }
         val data = message.contentData()
         if (OpenReplay.options.debugLogs) {
-            if (!message.toString().contains("IOSLog") && !message.toString().contains("IOSNetworkCall")) {
+            if (!message.toString().contains("IOSLog") && !message.toString()
+                    .contains("IOSNetworkCall")
+            ) {
                 DebugUtils.log(message.toString())
             }
             (message as? ORMobileNetworkCall)?.let { networkCallMessage ->
@@ -259,12 +267,17 @@ object MessageCollector {
             sendingLastMessages = true
             flushMessages()
         }
+
+        if (sendingLastImages) return
+
+        executorService.execute {
+            sendingLastImages = true
+            flushImages()
+        }
     }
 
     fun sendImagesBatch(batch: ByteArray, fileName: String) {
         imagesWaiting.add(BatchArch(name = fileName, data = batch))
-        executorService.execute {
-            flushImages()
-        }
+        executorService.execute { flushImages() }
     }
 }

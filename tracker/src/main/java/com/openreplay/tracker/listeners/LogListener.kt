@@ -1,8 +1,12 @@
 package com.openreplay.tracker.listeners
 
+import com.openreplay.tracker.managers.DebugUtils
 import com.openreplay.tracker.managers.MessageCollector
 import com.openreplay.tracker.models.script.ORMobileLog
-import java.io.*
+import java.io.IOException
+import java.io.PipedInputStream
+import java.io.PipedOutputStream
+import java.io.PrintStream
 import kotlin.concurrent.thread
 
 object LogsListener {
@@ -12,6 +16,11 @@ object LogsListener {
     fun start() {
         outputListener.start()
         errorListener.start()
+    }
+
+    fun stop() {
+        outputListener.stop()
+        errorListener.stop()
     }
 
     class Listener(
@@ -25,9 +34,8 @@ object LogsListener {
             try {
                 inputPipe.connect(outputPipe)
             } catch (e: IOException) {
-                e.printStackTrace()
+                DebugUtils.log(e.toString())
             }
-
             thread {
                 try {
                     val buffer = ByteArray(1024)
@@ -41,7 +49,7 @@ object LogsListener {
                         }
                     }
                 } catch (e: IOException) {
-                    e.printStackTrace()
+                    DebugUtils.log(e.toString())
                 }
             }
         }
@@ -65,7 +73,7 @@ object LogsListener {
                 inputPipe.close()
                 outputPipe.close()
             } catch (e: IOException) {
-                e.printStackTrace()
+                DebugUtils.log(e.toString())
             }
         }
     }

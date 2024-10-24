@@ -3,10 +3,15 @@ package com.openreplay.tracker.managers
 import NetworkManager
 import android.app.Activity
 import android.content.Context
-import android.graphics.*
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.Shader
 import android.os.Build
 import android.os.Handler
-import android.os.Looper
 import android.view.PixelCopy
 import android.view.View
 import android.view.ViewGroup
@@ -15,7 +20,10 @@ import androidx.compose.ui.platform.ComposeView
 import com.openreplay.tracker.OpenReplay
 import com.openreplay.tracker.SanitizableViewGroup
 import com.openreplay.tracker.models.RecordingFrequency
-import kotlinx.coroutines.*
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream
@@ -23,11 +31,12 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
-import java.util.*
+import java.util.Timer
 import java.util.zip.GZIPOutputStream
 import kotlin.concurrent.fixedRateTimer
 
 object ScreenshotManager {
+
     private var timer: Timer? = null
     private var screenshots: MutableList<Pair<ByteArray, Long>> = mutableListOf()
     private var screenshotsBackup: MutableList<Pair<ByteArray, Long>> = mutableListOf()
@@ -58,46 +67,56 @@ object ScreenshotManager {
     }
 
     fun stopCapturing() {
+        stopCycleBuffer()
         timer?.cancel()
         timer = null
-        stopCycleBuffer()
     }
 
     private fun captureScreenshot() {
         val activity = appContext as? Activity ?: return
-        val rootView = activity.window.decorView.rootView
-
-        activity.runOnUiThread {
-            compressAndSendView(rootView)
+        try {
+            activity.screenShot { compressAndSend(it) }
+        } catch (e: IllegalStateException) {
+            DebugUtils.error(e.localizedMessage)
+        } catch (e: IllegalArgumentException) {
+            DebugUtils.error(e.localizedMessage)
         }
     }
 
-    private fun compressAndSendView(view: View) {
+    private fun Activity.screenShot(result: (Bitmap) -> Unit) {
+        val activity = this
+        val view = window.decorView.rootView
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             // New version of Android, should use PixelCopy
-            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.RGB_565)
             val location = IntArray(2)
             view.getLocationInWindow(location)
 
-            PixelCopy.request(
-                (appContext as Activity).window,
-                Rect(location[0], location[1], location[0] + view.width, location[1] + view.height),
-                bitmap,
-                {
-                    if (it == PixelCopy.SUCCESS) {
-                        compressAndSend(bitmap)
-                    }
-                },
-                Handler(Looper.getMainLooper())
-            )
+
+            if (!activity.isFinishing)
+                PixelCopy.request(
+                    activity.window,
+                    Rect(
+                        location[0],
+                        location[1],
+                        location[0] + view.width,
+                        location[1] + view.height
+                    ),
+                    bitmap, {
+                        if (it == PixelCopy.SUCCESS) {
+                            result(bitmap)
+                        }
+                    },
+                    Handler(mainLooper)
+                )
         } else {
             // Old version can keep using view.draw
-            compressAndSend(viewToBitmap(view, view.width, view.height))
+            oldViewToBitmap(view)
         }
     }
 
-    private fun viewToBitmap(view: View, width: Int, height: Int): Bitmap {
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    fun oldViewToBitmap(view: View): Bitmap {
+        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.RGB_565)
         val canvas = Canvas(bitmap)
         view.draw(canvas)
 
@@ -243,16 +262,25 @@ object ScreenshotManager {
     }
 
     @OptIn(DelicateCoroutinesApi::class)
-    private fun compressAndSend(bitmap: Bitmap) = GlobalScope.launch {
+    private fun compressAndSend(originalBitmap: Bitmap, newWidth: Int = 480) = GlobalScope.launch {
         ByteArrayOutputStream().use { outputStream ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
-            val screenshotData = outputStream.toByteArray()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                originalBitmap.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, quality, outputStream)
+            } else {
+                originalBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
+            }
+            val aspectRatio = originalBitmap.height.toFloat() / originalBitmap.width.toFloat()
+            val newHeight = (newWidth * aspectRatio).toInt()
 
+            Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true)
+
+            val screenshotData = outputStream.toByteArray()
 //            saveToLocalFilesystem(appContext, screenshotData, "screenshot-${System.currentTimeMillis()}.jpg")
-            screenshots.add(Pair(screenshotData, System.currentTimeMillis()))
+            screenshots.add(screenshotData to System.currentTimeMillis())
             sendScreenshots()
         }
     }
+
 
     private fun saveToLocalFilesystem(context: Context, imageData: ByteArray, filename: String) {
         val file = File(context.filesDir, filename)
@@ -261,35 +289,19 @@ object ScreenshotManager {
         }
     }
 
-    fun syncBuffers() {
-        val buf1 = screenshots.size
-        val buf2 = screenshotsBackup.size
-        tick = 0
-
-        if (buf1 > buf2) {
-            screenshotsBackup.clear()
-        } else {
-            screenshots = ArrayList(screenshotsBackup)
-            screenshotsBackup.clear()
-        }
-
-        sendScreenshots()
-    }
-
     @OptIn(DelicateCoroutinesApi::class)
     private fun sendScreenshots() {
         val sessionId = NetworkManager.sessionId ?: return
         val archiveName = "$sessionId-$lastTs.tar.gz"
 
         GlobalScope.launch(Dispatchers.IO) {
-            val entries = mutableListOf<Pair<String, ByteArray>>()
             val images = synchronized(screenshots) { ArrayList(screenshots) }
             screenshots.clear()
 
-            images.forEach { (imageData, timestamp) ->
-                val filename = "${firstTs}_1_$timestamp.jpeg"
-                entries.add(filename to imageData)
+            val entries = images.map { (imageData, timestamp) ->
                 lastTs = timestamp
+                val filename = "${firstTs}_1_$timestamp.jpeg"
+                filename to imageData
             }
 
             val combinedData = ByteArrayOutputStream()
@@ -314,6 +326,21 @@ object ScreenshotManager {
                 e.printStackTrace()
             }
         }
+    }
+
+    fun syncBuffers() {
+        val buf1 = screenshots.size
+        val buf2 = screenshotsBackup.size
+        tick = 0
+
+        if (buf1 > buf2) {
+            screenshotsBackup.clear()
+        } else {
+            screenshots = ArrayList(screenshotsBackup)
+            screenshotsBackup.clear()
+        }
+
+        sendScreenshots()
     }
 
     fun startCycleBuffer() {

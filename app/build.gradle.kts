@@ -17,8 +17,8 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        val orServerUrl = System.getenv("OR_SERVER_URL")
-        val orProjectKey = System.getenv("OR_PROJECT_KEY")
+        val orServerUrl = "https://openreplay.popguide.app/ingest"
+        val orProjectKey = "5nrNwAsBJKXeL2knOz18"
         buildConfigField("String", "SERVER_URL", "\"$orServerUrl\"")
         buildConfigField("String", "PROJECT_KEY", "\"$orProjectKey\"")
     }

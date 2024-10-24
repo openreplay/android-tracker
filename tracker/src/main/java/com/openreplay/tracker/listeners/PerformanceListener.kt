@@ -229,8 +229,8 @@ class PerformanceListener private constructor(private val context: Context) : De
 
     fun stop() {
         if (isActive) {
-            context.unregisterReceiver(batteryLevelReceiver)
-            batteryLevelReceiver = null
+//            context.unregisterReceiver(batteryLevelReceiver)
+//            batteryLevelReceiver = null
             cpuTimer?.cancel()
             cpuTimer = null
             memTimer?.cancel()
