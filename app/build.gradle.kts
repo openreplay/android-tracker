@@ -14,11 +14,10 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        val orServerUrl = "https://openreplay.popguide.app/ingest"
-        val orProjectKey = "5nrNwAsBJKXeL2knOz18"
+        val orServerUrl = "null"
+        val orProjectKey = "null"
         buildConfigField("String", "SERVER_URL", "\"$orServerUrl\"")
         buildConfigField("String", "PROJECT_KEY", "\"$orProjectKey\"")
     }

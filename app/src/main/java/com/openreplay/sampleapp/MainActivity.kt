@@ -24,11 +24,7 @@ class MainActivity : AppCompatActivity() {
         val navView: BottomNavigationView = binding.navView
         val navController = findNavController(R.id.nav_host_fragment_activity_main)
         val appBarConfiguration = AppBarConfiguration(
-            setOf(
-                R.id.navigation_home,
-                R.id.navigation_dashboard,
-                R.id.navigation_notifications
-            )
+            setOf(R.id.navigation_home, R.id.navigation_dashboard, R.id.navigation_notifications)
         )
         navController.addOnDestinationChangedListener { _, destination, _ ->
             OpenReplay.event("Event Tab click", destination.label)
@@ -46,8 +42,7 @@ class MainActivity : AppCompatActivity() {
             projectKey = BuildConfig.PROJECT_KEY,
             options = OROptions.defaults,
             onStarted = {
-                OpenReplay.setUserID("SUPER FAST DILDO")
-                OpenReplay.event("Test Event", User("Victor", 25))
+                OpenReplay.event("Test Event", User("John Doe", 25))
             }
         )
     }
@@ -58,9 +53,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
-        ev?.let {
-            OpenReplay.onTouchEvent(it)
-        }
+        ev?.let { OpenReplay.onTouchEvent(it) }
         return super.dispatchTouchEvent(ev)
     }
 
