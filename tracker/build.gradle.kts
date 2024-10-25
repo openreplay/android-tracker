@@ -78,7 +78,7 @@ afterEvaluate {
                 from(components["release"])
                 groupId = "com.openreplay.tracker"
                 artifactId = "openreplay"
-                version = "1.1.2"
+                version = "1.1.4"
             }
         }
     }

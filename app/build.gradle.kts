@@ -14,11 +14,10 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        val orServerUrl = System.getenv("OR_SERVER_URL")
-        val orProjectKey = System.getenv("OR_PROJECT_KEY")
+        val orServerUrl = "null"
+        val orProjectKey = "null"
         buildConfigField("String", "SERVER_URL", "\"$orServerUrl\"")
         buildConfigField("String", "PROJECT_KEY", "\"$orProjectKey\"")
     }

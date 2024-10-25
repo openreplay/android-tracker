@@ -29,17 +29,21 @@ import com.openreplay.tracker.listeners.LogsListener
 import com.openreplay.tracker.listeners.ORGestureListener
 import com.openreplay.tracker.listeners.PerformanceListener
 import com.openreplay.tracker.listeners.sendNetworkMessage
-import com.openreplay.tracker.managers.*
+import com.openreplay.tracker.managers.ConditionsManager
+import com.openreplay.tracker.managers.DebugUtils
+import com.openreplay.tracker.managers.MessageCollector
+import com.openreplay.tracker.managers.ScreenshotManager
+import com.openreplay.tracker.managers.UserDefaults
 import com.openreplay.tracker.models.OROptions
-import com.openreplay.tracker.models.SessionRequest
-import java.util.*
-import kotlin.math.max
-import kotlin.math.min
 import com.openreplay.tracker.models.RecordingQuality
+import com.openreplay.tracker.models.SessionRequest
 import com.openreplay.tracker.models.script.ORMobileEvent
 import com.openreplay.tracker.models.script.ORMobileMetadata
 import com.openreplay.tracker.models.script.ORMobileUserID
 import java.io.File
+import java.util.Date
+import kotlin.math.max
+import kotlin.math.min
 
 enum class CheckState {
     UNCHECKED, CAN_START, CANT_START
@@ -129,7 +133,6 @@ object OpenReplay {
                 if (screen) ScreenshotManager.start(appContext!!, sessionStartTs)
                 if (analytics) Analytics.start()
             }
-
             onStarted()
         }
     }
@@ -199,11 +202,12 @@ object OpenReplay {
     }
 
     fun stop() {
-        Analytics.stop()
-        MessageCollector.stop()
-        PerformanceListener.getInstance(appContext!!).stop()
         ScreenshotManager.stopCapturing()
+        Analytics.stop()
+        LogsListener.stop()
+        PerformanceListener.getInstance(appContext!!).stop()
         Crash.stop()
+        MessageCollector.stop()
     }
 
     fun setUserID(userID: String) {
@@ -321,7 +325,7 @@ fun getCaptureSettings(fps: Int, quality: RecordingQuality): Pair<Int, Int> {
         RecordingQuality.High -> 60
     }
 
-    return Pair(captureRate, imgCompression)
+    return captureRate to imgCompression
 }
 
 class SanitizableViewGroup(context: Context) : ViewGroup(context) {
