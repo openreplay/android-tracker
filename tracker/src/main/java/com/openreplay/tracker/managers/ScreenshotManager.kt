@@ -31,6 +31,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.lang.ref.WeakReference
 import java.util.Timer
 import java.util.zip.GZIPOutputStream
 import kotlin.concurrent.fixedRateTimer
@@ -44,9 +45,9 @@ object ScreenshotManager {
     private var lastTs: Long = 0
     private var firstTs: Long = 0
     private var bufferTimer: Timer? = null
-    private lateinit var appContext: Context
     private var sanitizedElements: MutableList<View> = mutableListOf()
     private var quality: Int = 10
+    private lateinit var uiContext: WeakReference<Context>
 
     fun setSettings(settings: Pair<Int, Int>) {
         val (_, quality) = settings
@@ -54,7 +55,7 @@ object ScreenshotManager {
     }
 
     fun start(context: Context, startTs: Long) {
-        appContext = context
+        uiContext = WeakReference(context)
         firstTs = startTs
         startCapturing(OpenReplay.options.screenshotFrequency.millis / OpenReplay.options.fps.toLong())
     }
@@ -73,7 +74,7 @@ object ScreenshotManager {
     }
 
     private fun captureScreenshot() {
-        val activity = appContext as? Activity ?: return
+        val activity = uiContext.get() as? Activity ?: return
         try {
             activity.screenShot { compressAndSend(it) }
         } catch (e: IllegalStateException) {
@@ -88,7 +89,7 @@ object ScreenshotManager {
         val view = window.decorView.rootView
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             // New version of Android, should use PixelCopy
-            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.RGB_565)
+            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
             val location = IntArray(2)
             view.getLocationInWindow(location)
 
@@ -111,12 +112,12 @@ object ScreenshotManager {
                 )
         } else {
             // Old version can keep using view.draw
-            oldViewToBitmap(view)
+            result(oldViewToBitmap(view))
         }
     }
 
-    fun oldViewToBitmap(view: View): Bitmap {
-        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.RGB_565)
+    private fun oldViewToBitmap(view: View): Bitmap {
+        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         view.draw(canvas)
 
