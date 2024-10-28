@@ -46,12 +46,14 @@ object ScreenshotManager {
     private var firstTs: Long = 0
     private var bufferTimer: Timer? = null
     private var sanitizedElements: MutableList<View> = mutableListOf()
-    private var quality: Int = 10
     private lateinit var uiContext: WeakReference<Context>
+    private var quality: Int = 10
+    private var minResolution: Int = 320
 
-    fun setSettings(settings: Pair<Int, Int>) {
-        val (_, quality) = settings
+    fun setSettings(settings: Triple<Int, Int, Int>) {
+        val (_, quality, resolution) = settings
         ScreenshotManager.quality = quality
+        ScreenshotManager.minResolution = resolution
     }
 
     fun start(context: Context, startTs: Long) {
@@ -263,7 +265,7 @@ object ScreenshotManager {
     }
 
     @OptIn(DelicateCoroutinesApi::class)
-    private fun compressAndSend(originalBitmap: Bitmap, newWidth: Int = 480) = GlobalScope.launch {
+    private fun compressAndSend(originalBitmap: Bitmap) = GlobalScope.launch {
         ByteArrayOutputStream().use { outputStream ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 originalBitmap.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, quality, outputStream)
@@ -271,9 +273,9 @@ object ScreenshotManager {
                 originalBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
             }
             val aspectRatio = originalBitmap.height.toFloat() / originalBitmap.width.toFloat()
-            val newHeight = (newWidth * aspectRatio).toInt()
+            val newHeight = (minResolution * aspectRatio).toInt()
 
-            Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true)
+            Bitmap.createScaledBitmap(originalBitmap, minResolution, newHeight, true)
 
             val screenshotData = outputStream.toByteArray()
 //            saveToLocalFilesystem(appContext, screenshotData, "screenshot-${System.currentTimeMillis()}.jpg")

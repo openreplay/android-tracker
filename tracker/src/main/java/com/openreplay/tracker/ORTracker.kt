@@ -315,7 +315,7 @@ object OpenReplay {
     }
 }
 
-fun getCaptureSettings(fps: Int, quality: RecordingQuality): Pair<Int, Int> {
+fun getCaptureSettings(fps: Int, quality: RecordingQuality): Triple<Int, Int, Int> {
     val limitedFPS = min(max(fps, 1), 99)
     val captureRate = 1000 / limitedFPS // Milliseconds per frame
 
@@ -324,8 +324,13 @@ fun getCaptureSettings(fps: Int, quality: RecordingQuality): Pair<Int, Int> {
         RecordingQuality.Standard -> 30
         RecordingQuality.High -> 60
     }
+    val imgResolution = when (quality) {
+        RecordingQuality.Low -> 480
+        RecordingQuality.Standard -> 720
+        RecordingQuality.High -> 1080
+    }
 
-    return captureRate to imgCompression
+    return Triple(captureRate, imgCompression, imgResolution)
 }
 
 class SanitizableViewGroup(context: Context) : ViewGroup(context) {
