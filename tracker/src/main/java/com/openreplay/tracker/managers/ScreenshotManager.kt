@@ -31,6 +31,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.lang.ref.WeakReference
 import java.util.Timer
 import java.util.zip.GZIPOutputStream
 import kotlin.concurrent.fixedRateTimer
@@ -44,17 +45,19 @@ object ScreenshotManager {
     private var lastTs: Long = 0
     private var firstTs: Long = 0
     private var bufferTimer: Timer? = null
-    private lateinit var appContext: Context
     private var sanitizedElements: MutableList<View> = mutableListOf()
+    private lateinit var uiContext: WeakReference<Context>
     private var quality: Int = 10
+    private var minResolution: Int = 320
 
-    fun setSettings(settings: Pair<Int, Int>) {
-        val (_, quality) = settings
+    fun setSettings(settings: Triple<Int, Int, Int>) {
+        val (_, quality, resolution) = settings
         ScreenshotManager.quality = quality
+        ScreenshotManager.minResolution = resolution
     }
 
     fun start(context: Context, startTs: Long) {
-        appContext = context
+        uiContext = WeakReference(context)
         firstTs = startTs
         startCapturing(OpenReplay.options.screenshotFrequency.millis / OpenReplay.options.fps.toLong())
     }
@@ -73,7 +76,7 @@ object ScreenshotManager {
     }
 
     private fun captureScreenshot() {
-        val activity = appContext as? Activity ?: return
+        val activity = uiContext.get() as? Activity ?: return
         try {
             activity.screenShot { compressAndSend(it) }
         } catch (e: IllegalStateException) {
@@ -88,7 +91,7 @@ object ScreenshotManager {
         val view = window.decorView.rootView
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             // New version of Android, should use PixelCopy
-            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.RGB_565)
+            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
             val location = IntArray(2)
             view.getLocationInWindow(location)
 
@@ -111,12 +114,12 @@ object ScreenshotManager {
                 )
         } else {
             // Old version can keep using view.draw
-            oldViewToBitmap(view)
+            result(oldViewToBitmap(view))
         }
     }
 
-    fun oldViewToBitmap(view: View): Bitmap {
-        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.RGB_565)
+    private fun oldViewToBitmap(view: View): Bitmap {
+        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         view.draw(canvas)
 
@@ -262,7 +265,7 @@ object ScreenshotManager {
     }
 
     @OptIn(DelicateCoroutinesApi::class)
-    private fun compressAndSend(originalBitmap: Bitmap, newWidth: Int = 480) = GlobalScope.launch {
+    private fun compressAndSend(originalBitmap: Bitmap) = GlobalScope.launch {
         ByteArrayOutputStream().use { outputStream ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 originalBitmap.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, quality, outputStream)
@@ -270,9 +273,9 @@ object ScreenshotManager {
                 originalBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
             }
             val aspectRatio = originalBitmap.height.toFloat() / originalBitmap.width.toFloat()
-            val newHeight = (newWidth * aspectRatio).toInt()
+            val newHeight = (minResolution * aspectRatio).toInt()
 
-            Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true)
+            Bitmap.createScaledBitmap(originalBitmap, minResolution, newHeight, true)
 
             val screenshotData = outputStream.toByteArray()
 //            saveToLocalFilesystem(appContext, screenshotData, "screenshot-${System.currentTimeMillis()}.jpg")
