@@ -144,24 +144,26 @@ object MessageCollector {
     }
 
     private fun flushImages() {
-        if (imagesWaiting.isNotEmpty()) {
-            val images = imagesWaiting.removeAt(0)
-            imagesSending.add(images)
+        synchronized(this) {
+            if (imagesWaiting.isNotEmpty()) {
+                val images = imagesWaiting.removeAt(0)
+                imagesSending.add(images)
 
-            DebugUtils.log("Sending images ${images.name} ${images.data.size}")
-            NetworkManager.sendImages(
-                OpenReplay.projectKey!!,
-                images.data,
-                images.name
-            ) { success ->
-                imagesSending.removeAll { it.name == images.name }
-                if (!success) {
-                    imagesWaiting.add(
-                        0,
-                        images
-                    ) // Re-add to the start of the queue if not successful
-                } else if (sendingLastImages) {
-                    sendingLastImages = false
+                DebugUtils.log("Sending images ${images.name} ${images.data.size}")
+                NetworkManager.sendImages(
+                    OpenReplay.projectKey!!,
+                    images.data,
+                    images.name
+                ) { success ->
+                    imagesSending.removeAll { it.name == images.name }
+                    if (!success) {
+                        imagesWaiting.add(
+                            0,
+                            images
+                        ) // Re-add to the start of the queue if not successful
+                    } else if (sendingLastImages) {
+                        sendingLastImages = false
+                    }
                 }
             }
         }
