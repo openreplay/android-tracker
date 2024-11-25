@@ -19,11 +19,16 @@ import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import com.openreplay.tracker.OpenReplay
 import com.openreplay.tracker.SanitizableViewGroup
-import com.openreplay.tracker.models.RecordingFrequency
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream
@@ -32,57 +37,86 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.lang.ref.WeakReference
-import java.util.Timer
 import java.util.zip.GZIPOutputStream
-import kotlin.concurrent.fixedRateTimer
+import kotlin.coroutines.suspendCoroutine
 
 object ScreenshotManager {
+    private var screenShotJob: Job? = null
 
-    private var timer: Timer? = null
-    private var screenshots: MutableList<Pair<ByteArray, Long>> = mutableListOf()
-    private var screenshotsBackup: MutableList<Pair<ByteArray, Long>> = mutableListOf()
-    private var tick: Long = 0
+    private var screenshots: MutableList<Pair<File, Long>> = mutableListOf()
     private var lastTs: Long = 0
     private var firstTs: Long = 0
-    private var bufferTimer: Timer? = null
     private var sanitizedElements: MutableList<View> = mutableListOf()
     private lateinit var uiContext: WeakReference<Context>
     private var quality: Int = 10
     private var minResolution: Int = 320
 
+    private var isStoping = false
     fun setSettings(settings: Triple<Int, Int, Int>) {
         val (_, quality, resolution) = settings
-        ScreenshotManager.quality = quality
-        ScreenshotManager.minResolution = resolution
+        this.quality = quality
+        this.minResolution = resolution
     }
 
-    fun start(context: Context, startTs: Long) {
+    @OptIn(DelicateCoroutinesApi::class)
+    fun start(context: Context, startTs: Long, scope: CoroutineScope = GlobalScope) {
         uiContext = WeakReference(context)
         firstTs = startTs
-        startCapturing(OpenReplay.options.screenshotFrequency.millis / OpenReplay.options.fps.toLong())
-    }
-
-    private fun startCapturing(intervalMillis: Long = RecordingFrequency.Low.millis) {
-        stopCapturing()
-        timer = fixedRateTimer("screenshotTimer", false, 0L, intervalMillis) {
-            captureScreenshot()
+        isStoping = false
+        // endless job to perform capturing
+        screenShotJob = scope.launch {
+            val intervalMillis =
+                OpenReplay.options.screenshotFrequency.millis / OpenReplay.options.fps.toLong()
+            while (true) {
+                if (isStoping) {
+                    if (screenshots.isNotEmpty()) {
+                        sendScreenshots(chunkSize = screenshots.size)
+                    }
+                    screenShotJob?.cancelAndJoin()
+                } else {
+                    delay(intervalMillis)
+                    val screenShot = withContext(Dispatchers.Main) { captureScreenshot() }
+                    withContext(Dispatchers.IO) {
+                        try {
+                            val byteScreenShot = compress(screenShot)
+                            // add screen shot to storage
+                            addToScreenShots(byteScreenShot)
+                            // while we are doing  our job we  gather and send data
+                            sendScreenshots(chunkSize = 10)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                }
+            }
         }
     }
 
+
     fun stopCapturing() {
-        stopCycleBuffer()
-        timer?.cancel()
-        timer = null
+        isStoping = true
     }
 
-    private fun captureScreenshot() {
-        val activity = uiContext.get() as? Activity ?: return
-        try {
-            activity.screenShot { compressAndSend(it) }
-        } catch (e: IllegalStateException) {
-            DebugUtils.error(e.localizedMessage)
-        } catch (e: IllegalArgumentException) {
-            DebugUtils.error(e.localizedMessage)
+    fun addSanitizedElement(view: View) {
+        if (OpenReplay.options.debugLogs) {
+            DebugUtils.log("Sanitizing view: $view")
+        }
+        sanitizedElements.add(view)
+    }
+
+    fun removeSanitizedElement(view: View) {
+        if (OpenReplay.options.debugLogs) {
+            DebugUtils.log("Removing sanitized view: $view")
+        }
+        sanitizedElements.remove(view)
+    }
+
+    private suspend fun captureScreenshot(): Bitmap {
+        val activity = uiContext.get() as? Activity ?: throw IllegalStateException("No Activity")
+        return suspendCoroutine { coroutine ->
+            activity.screenShot { shot ->
+                coroutine.resumeWith(Result.success(shot))
+            }
         }
     }
 
@@ -264,123 +298,82 @@ object ScreenshotManager {
         }
     }
 
-    @OptIn(DelicateCoroutinesApi::class)
-    private fun compressAndSend(originalBitmap: Bitmap) = GlobalScope.launch {
+    private suspend fun compress(originalBitmap: Bitmap): ByteArray = suspendCoroutine {
         ByteArrayOutputStream().use { outputStream ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                originalBitmap.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, quality, outputStream)
-            } else {
-                originalBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
-            }
             val aspectRatio = originalBitmap.height.toFloat() / originalBitmap.width.toFloat()
             val newHeight = (minResolution * aspectRatio).toInt()
 
-            Bitmap.createScaledBitmap(originalBitmap, minResolution, newHeight, true)
+            val updated = Bitmap.createScaledBitmap(originalBitmap, minResolution, newHeight, true)
 
-            val screenshotData = outputStream.toByteArray()
-//            saveToLocalFilesystem(appContext, screenshotData, "screenshot-${System.currentTimeMillis()}.jpg")
-            screenshots.add(screenshotData to System.currentTimeMillis())
-            sendScreenshots()
-        }
-    }
-
-
-    private fun saveToLocalFilesystem(context: Context, imageData: ByteArray, filename: String) {
-        val file = File(context.filesDir, filename)
-        FileOutputStream(file).use { out ->
-            out.write(imageData)
-        }
-    }
-
-    @OptIn(DelicateCoroutinesApi::class)
-    private fun sendScreenshots() {
-        val sessionId = NetworkManager.sessionId ?: return
-        val archiveName = "$sessionId-$lastTs.tar.gz"
-
-        GlobalScope.launch(Dispatchers.IO) {
-            val images = synchronized(screenshots) { ArrayList(screenshots) }
-            screenshots.clear()
-
-            val entries = images.map { (imageData, timestamp) ->
-                lastTs = timestamp
-                val filename = "${firstTs}_1_$timestamp.jpeg"
-                filename to imageData
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                updated.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, quality, outputStream)
+            } else {
+                updated.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
             }
+            it.resumeWith(Result.success(outputStream.toByteArray()))
+        }
+    }
 
-            val combinedData = ByteArrayOutputStream()
-            GzipCompressorOutputStream(combinedData).use { gzos ->
-                TarArchiveOutputStream(gzos).use { tarOs ->
-                    entries.forEach { (filename, imageData) ->
-                        val tarEntry = TarArchiveEntry(filename)
-                        tarEntry.size = imageData.size.toLong()
-                        tarOs.putArchiveEntry(tarEntry)
-                        ByteArrayInputStream(imageData).copyTo(tarOs)
-                        tarOs.closeArchiveEntry()
+    private suspend fun sendScreenshots(chunkSize: Int) {
+        coroutineScope {
+            val sessionId = NetworkManager.sessionId ?: throw IllegalStateException("No session")
+            if (screenshots.size < chunkSize) {
+                DebugUtils.log("buffering screenshots")
+            } else {
+                val archiveName = "$sessionId-$lastTs.tar.gz"
+                // prepare data
+                val entries = screenshots.map { (imageFile, timestamp) ->
+                    lastTs = timestamp
+                    val filename = "${firstTs}_1_$timestamp.jpeg"
+                    filename to imageFile.readBytes()
+                }
+                // delete real picture from device
+                screenshots.forEach { (file, _) -> file.delete() }
+                screenshots.clear()
+
+                // zip all pictures
+                val combinedData = ByteArrayOutputStream()
+                GzipCompressorOutputStream(combinedData).use { gzos ->
+                    TarArchiveOutputStream(gzos).use { tarOs ->
+                        entries.forEach { (filename, readBytes) ->
+                            val tarEntry = TarArchiveEntry(filename)
+                            tarEntry.size = readBytes.size.toLong()
+                            tarOs.putArchiveEntry(tarEntry)
+                            ByteArrayInputStream(readBytes).copyTo(tarOs)
+                            tarOs.closeArchiveEntry()
+                        }
                     }
                 }
-            }
 
-            val gzData = combinedData.toByteArray()
+                val archive = saveToLocalFilesystem(
+                    bytes = combinedData.toByteArray(),
+                    filename = archiveName
+                )
 
-            try {
-                MessageCollector.sendImagesBatch(gzData, archiveName)
-                screenshots.clear()
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-    }
-
-    fun syncBuffers() {
-        val buf1 = screenshots.size
-        val buf2 = screenshotsBackup.size
-        tick = 0
-
-        if (buf1 > buf2) {
-            screenshotsBackup.clear()
-        } else {
-            screenshots = ArrayList(screenshotsBackup)
-            screenshotsBackup.clear()
-        }
-
-        sendScreenshots()
-    }
-
-    fun startCycleBuffer() {
-        bufferTimer = fixedRateTimer("cycleBuffer", false, 0L, 30_000) {
-            cycleBuffer()
-        }
-    }
-
-    fun stopCycleBuffer() {
-        bufferTimer?.cancel()
-        bufferTimer = null
-    }
-
-    fun cycleBuffer() {
-        bufferTimer = fixedRateTimer("cycleBuffer", false, 0L, 30_000) {
-            if (OpenReplay.bufferingMode) {
-                if ((tick % 2).toInt() == 0) {
-                    screenshots.clear()
-                } else {
-                    screenshotsBackup.clear()
+                try {
+                    MessageCollector.sendImagesBatch(archive)
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
-                tick++
             }
         }
     }
 
-    fun addSanitizedElement(view: View) {
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("Sanitizing view: $view")
-        }
-        sanitizedElements.add(view)
+    private fun addToScreenShots(byteScreenShot: ByteArray) {
+        val millis = System.currentTimeMillis()
+        val file = saveToLocalFilesystem(
+            bytes = byteScreenShot,
+            filename = "screenshot-${System.currentTimeMillis()}.jpg"
+        )
+        screenshots.add(file to millis)
     }
 
-    fun removeSanitizedElement(view: View) {
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("Removing sanitized view: $view")
+    private fun saveToLocalFilesystem(bytes: ByteArray, filename: String): File {
+        val context = uiContext.get() ?: throw IllegalStateException("No context")
+        val file = File(context.filesDir, filename)
+        FileOutputStream(file).use { out ->
+            out.write(bytes)
         }
-        sanitizedElements.remove(view)
+        return file
     }
 }
