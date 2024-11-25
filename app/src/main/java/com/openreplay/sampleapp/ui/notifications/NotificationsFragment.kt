@@ -8,6 +8,7 @@ import android.widget.TextView
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import com.openreplay.sampleapp.databinding.FragmentNotificationsBinding
+import com.openreplay.tracker.OpenReplay
 
 class NotificationsFragment : Fragment() {
 
@@ -31,6 +32,7 @@ class NotificationsFragment : Fragment() {
         val textView: TextView = binding.textNotifications
         notificationsViewModel.text.observe(viewLifecycleOwner) {
             textView.text = it
+            OpenReplay.event("Test Event", it)
         }
         return root
     }

@@ -35,8 +35,24 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        startOpenReplay()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        stopOpenReplay()
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
+        ev?.let { OpenReplay.onTouchEvent(it) }
+        return super.dispatchTouchEvent(ev)
+    }
+
+
+    private fun startOpenReplay() {
         OpenReplay.setupGestureDetector(this)
         OpenReplay.serverURL = BuildConfig.SERVER_URL
+        OpenReplay.setUserID("TEST")
         OpenReplay.start(
             context = this,
             projectKey = BuildConfig.PROJECT_KEY,
@@ -47,16 +63,9 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    override fun onStop() {
+    private fun stopOpenReplay() {
         OpenReplay.stop()
-        super.onStop()
     }
-
-    override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
-        ev?.let { OpenReplay.onTouchEvent(it) }
-        return super.dispatchTouchEvent(ev)
-    }
-
 
     private data class User(val name: String, val age: Int)
 }
