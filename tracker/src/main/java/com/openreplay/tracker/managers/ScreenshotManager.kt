@@ -19,15 +19,15 @@ import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import com.openreplay.tracker.OpenReplay
 import com.openreplay.tracker.SanitizableViewGroup
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
@@ -37,6 +37,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.lang.ref.WeakReference
+import java.util.concurrent.Executors
 import java.util.zip.GZIPOutputStream
 import kotlin.coroutines.suspendCoroutine
 
@@ -51,6 +52,7 @@ object ScreenshotManager {
     private var quality: Int = 10
     private var minResolution: Int = 320
 
+
     private var isStoping = false
     fun setSettings(settings: Triple<Int, Int, Int>) {
         val (_, quality, resolution) = settings
@@ -59,42 +61,36 @@ object ScreenshotManager {
     }
 
     @OptIn(DelicateCoroutinesApi::class)
-    fun start(context: Context, startTs: Long, scope: CoroutineScope = GlobalScope) {
+    fun start(context: Context, startTs: Long) {
         uiContext = WeakReference(context)
         firstTs = startTs
         isStoping = false
         // endless job to perform capturing
-        screenShotJob = scope.launch {
+
+        screenShotJob = GlobalScope.launch {
             val intervalMillis =
                 OpenReplay.options.screenshotFrequency.millis / OpenReplay.options.fps.toLong()
             while (true) {
-                if (isStoping) {
-                    if (screenshots.isNotEmpty()) {
-                        sendScreenshots(chunkSize = screenshots.size)
-                    }
-                    screenShotJob?.cancelAndJoin()
-                } else {
-                    delay(intervalMillis)
-                    val screenShot = withContext(Dispatchers.Main) { captureScreenshot() }
-                    withContext(Dispatchers.IO) {
-                        try {
-                            val byteScreenShot = compress(screenShot)
-                            // add screen shot to storage
-                            addToScreenShots(byteScreenShot)
-                            // while we are doing  our job we  gather and send data
-                            sendScreenshots(chunkSize = 10)
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
+                delay(intervalMillis)
+                val screenShot = withContext(Dispatchers.Main) { captureScreenshot() }
+                withContext(Dispatchers.IO) {
+                    try {
+                        val byteScreenShot = compress(screenShot)
+                        // add screen shot to storage
+                        addToScreenShots(byteScreenShot)
+                        // while we are doing  our job we  gather and send data
+                        sendScreenshots(chunkSize = 10)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
                     }
                 }
             }
         }
     }
 
-
-    fun stopCapturing() {
-        isStoping = true
+    fun stop() {
+        screenShotJob?.cancel()
+        terminate()
     }
 
     fun addSanitizedElement(view: View) {
@@ -112,7 +108,8 @@ object ScreenshotManager {
     }
 
     private suspend fun captureScreenshot(): Bitmap {
-        val activity = uiContext.get() as? Activity ?: throw IllegalStateException("No Activity")
+        val activity =
+            uiContext.get() as? Activity ?: throw IllegalStateException("No Activity")
         return suspendCoroutine { coroutine ->
             activity.screenShot { shot ->
                 coroutine.resumeWith(Result.success(shot))
@@ -253,7 +250,8 @@ object ScreenshotManager {
 
     private fun createCrossStripedPatternBitmap(): Bitmap {
         val patternSize = 80
-        val patternBitmap = Bitmap.createBitmap(patternSize, patternSize, Bitmap.Config.ARGB_8888)
+        val patternBitmap =
+            Bitmap.createBitmap(patternSize, patternSize, Bitmap.Config.ARGB_8888)
         val patternCanvas = Canvas(patternBitmap)
         val paint = Paint().apply {
             color = Color.DKGRAY
@@ -303,7 +301,8 @@ object ScreenshotManager {
             val aspectRatio = originalBitmap.height.toFloat() / originalBitmap.width.toFloat()
             val newHeight = (minResolution * aspectRatio).toInt()
 
-            val updated = Bitmap.createScaledBitmap(originalBitmap, minResolution, newHeight, true)
+            val updated =
+                Bitmap.createScaledBitmap(originalBitmap, minResolution, newHeight, true)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 updated.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, quality, outputStream)
@@ -316,10 +315,13 @@ object ScreenshotManager {
 
     private suspend fun sendScreenshots(chunkSize: Int) {
         coroutineScope {
-            val sessionId = NetworkManager.sessionId ?: throw IllegalStateException("No session")
+            val sessionId =
+                NetworkManager.sessionId ?: throw IllegalStateException("No session")
             if (screenshots.size < chunkSize) {
-                DebugUtils.log("buffering screenshots")
+                DebugUtils.log("buffering screenshots ${screenshots.size}")
             } else {
+                DebugUtils.log("archiving screenshots ${screenshots.size}")
+
                 val archiveName = "$sessionId-$lastTs.tar.gz"
                 // prepare data
                 val entries = screenshots.map { (imageFile, timestamp) ->
@@ -349,11 +351,12 @@ object ScreenshotManager {
                     bytes = combinedData.toByteArray(),
                     filename = archiveName
                 )
-
-                try {
-                    MessageCollector.sendImagesBatch(archive)
-                } catch (e: Exception) {
-                    e.printStackTrace()
+                NetworkManager.sendImages(
+                    projectKey = OpenReplay.projectKey!!,
+                    images = archive.readBytes(),
+                    name = archive.name
+                ) { success ->
+                    archive.delete()
                 }
             }
         }
@@ -375,5 +378,19 @@ object ScreenshotManager {
             out.write(bytes)
         }
         return file
+    }
+
+    private fun terminate() {
+        if (screenshots.isNotEmpty()) {
+            Executors.newSingleThreadExecutor()
+                .asCoroutineDispatcher()
+                .use { dispatcher ->
+                    runBlocking {
+                        launch(dispatcher) {
+                            sendScreenshots(chunkSize = screenshots.size)
+                        }
+                    }
+                }
+        }
     }
 }

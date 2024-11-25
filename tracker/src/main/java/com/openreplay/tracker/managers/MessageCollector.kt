@@ -13,37 +13,11 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
-data class BatchArch(
-    var name: String,
-    var data: ByteArray
-) {
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-
-        other as BatchArch
-
-        if (name != other.name) return false
-        if (!data.contentEquals(other.data)) return false
-
-        return true
-    }
-
-    override fun hashCode(): Int {
-        var result = name.hashCode()
-        result = 31 * result + data.contentHashCode()
-        return result
-    }
-}
-
 object MessageCollector {
-    private val filesWaiting = mutableListOf<File>()
-    private val filesSending = mutableListOf<File>()
     private var messagesWaiting = mutableListOf<ByteArray>()
     private val messagesWaitingBackup = mutableListOf<ByteArray>()
     private var nextMessageIndex = 0
     private var sendingLastMessages = false
-    private var sendingLastImages = false
     private val maxMessagesSize = 500_000
     private var lateMessagesFile: File? = null
     private var sendInterval: Handler? = null
@@ -72,11 +46,9 @@ object MessageCollector {
 
     fun start() {
         this.lateMessagesFile = OpenReplay.getLateMessagesFile()
-
         sendIntervalFuture = executorService.scheduleWithFixedDelay({
             executorService.execute {
                 flushMessages()
-                flushImages()
             }
         }, 0, 5, TimeUnit.SECONDS)
 
@@ -138,34 +110,6 @@ object MessageCollector {
                 sendingLastMessages = false
                 if (lateMessagesFile?.exists() == true) {
                     lateMessagesFile!!.delete()
-                }
-            }
-        }
-    }
-
-    private fun flushImages() {
-        synchronized(filesWaiting) {
-            if (filesWaiting.isNotEmpty()) {
-                val fileArchive = filesWaiting.removeAt(0)
-                filesSending.add(fileArchive)
-
-                DebugUtils.log("Sending images in archive ${fileArchive.name} }")
-
-                NetworkManager.sendImages(
-                    projectKey = OpenReplay.projectKey!!,
-                    images = fileArchive.readBytes(),
-                    name = fileArchive.name
-                ) { success ->
-                    filesSending.removeAll { it.name == fileArchive.name }
-                    fileArchive.delete()
-                    if (!success) {
-                        filesWaiting.add(
-                            0,
-                            fileArchive
-                        ) // Re-add to the start of the queue if not successful
-                    } else if (sendingLastImages) {
-                        sendingLastImages = false
-                    }
                 }
             }
         }
@@ -265,22 +209,9 @@ object MessageCollector {
 
     private fun terminate() {
         if (sendingLastMessages) return
-
         executorService.execute {
             sendingLastMessages = true
             flushMessages()
         }
-
-        if (sendingLastImages) return
-
-        executorService.execute {
-            sendingLastImages = true
-            flushImages()
-        }
-    }
-
-    fun sendImagesBatch(archive: File) {
-        filesWaiting.add(archive)
-        executorService.execute { flushImages() }
     }
 }

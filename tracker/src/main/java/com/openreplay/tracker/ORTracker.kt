@@ -200,7 +200,7 @@ object OpenReplay {
     }
 
     fun stop() {
-        ScreenshotManager.stopCapturing()
+        ScreenshotManager.stop()
         Analytics.stop()
         LogsListener.stop()
         PerformanceListener.getInstance(appContext!!).stop()
