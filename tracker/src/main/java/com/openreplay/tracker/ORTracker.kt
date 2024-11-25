@@ -166,7 +166,6 @@ object OpenReplay {
                         getCaptureSettings(fps = 1, quality = options.screenshotQuality)
                     ScreenshotManager.setSettings(settings = captureSettings)
                     ScreenshotManager.start(appContext!!, sessionStartTs)
-                    ScreenshotManager.cycleBuffer()
                 }
                 if (analytics) Analytics.start()
             }
@@ -181,7 +180,6 @@ object OpenReplay {
         SessionRequest.create(context = appContext!!, doNotRecord = false) { sessionResponse ->
             sessionResponse?.let {
                 MessageCollector.syncBuffers()
-                ScreenshotManager.syncBuffers()
                 MessageCollector.start()
             } ?: run {
                 println("Openreplay: no response from /start request")
