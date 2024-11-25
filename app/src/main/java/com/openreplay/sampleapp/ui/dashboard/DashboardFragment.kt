@@ -8,6 +8,7 @@ import android.widget.TextView
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import com.openreplay.sampleapp.databinding.FragmentDashboardBinding
+import com.openreplay.tracker.OpenReplay
 
 class DashboardFragment : Fragment() {
 
@@ -31,6 +32,7 @@ class DashboardFragment : Fragment() {
         val textView: TextView = binding.textDashboard
         dashboardViewModel.text.observe(viewLifecycleOwner) {
             textView.text = it
+            OpenReplay.event("Test Event", it)
         }
         return root
     }

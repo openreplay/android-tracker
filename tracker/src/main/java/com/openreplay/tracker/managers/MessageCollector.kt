@@ -37,8 +37,8 @@ data class BatchArch(
 }
 
 object MessageCollector {
-    private val imagesWaiting = mutableListOf<BatchArch>()
-    private val imagesSending = mutableListOf<BatchArch>()
+    private val filesWaiting = mutableListOf<File>()
+    private val filesSending = mutableListOf<File>()
     private var messagesWaiting = mutableListOf<ByteArray>()
     private val messagesWaitingBackup = mutableListOf<ByteArray>()
     private var nextMessageIndex = 0
@@ -144,22 +144,24 @@ object MessageCollector {
     }
 
     private fun flushImages() {
-        synchronized(this) {
-            if (imagesWaiting.isNotEmpty()) {
-                val images = imagesWaiting.removeAt(0)
-                imagesSending.add(images)
+        synchronized(filesWaiting) {
+            if (filesWaiting.isNotEmpty()) {
+                val fileArchive = filesWaiting.removeAt(0)
+                filesSending.add(fileArchive)
 
-                DebugUtils.log("Sending images ${images.name} ${images.data.size}")
+                DebugUtils.log("Sending images in archive ${fileArchive.name} }")
+
                 NetworkManager.sendImages(
-                    OpenReplay.projectKey!!,
-                    images.data,
-                    images.name
+                    projectKey = OpenReplay.projectKey!!,
+                    images = fileArchive.readBytes(),
+                    name = fileArchive.name
                 ) { success ->
-                    imagesSending.removeAll { it.name == images.name }
+                    filesSending.removeAll { it.name == fileArchive.name }
+                    fileArchive.delete()
                     if (!success) {
-                        imagesWaiting.add(
+                        filesWaiting.add(
                             0,
-                            images
+                            fileArchive
                         ) // Re-add to the start of the queue if not successful
                     } else if (sendingLastImages) {
                         sendingLastImages = false
@@ -175,7 +177,6 @@ object MessageCollector {
                 OpenReplay.triggerRecording(trigger)
             }
         }
-        val data = message.contentData()
         if (OpenReplay.options.debugLogs) {
             if (!message.toString().contains("IOSLog") && !message.toString()
                     .contains("IOSNetworkCall")
@@ -186,7 +187,7 @@ object MessageCollector {
                 DebugUtils.log("-->> IOSNetworkCall(105): ${networkCallMessage.method} ${networkCallMessage.URL}")
             }
         }
-        sendRawMessage(data)
+        sendRawMessage(data = message.contentData())
     }
 
     fun syncBuffers() {
@@ -278,8 +279,8 @@ object MessageCollector {
         }
     }
 
-    fun sendImagesBatch(batch: ByteArray, fileName: String) {
-        imagesWaiting.add(BatchArch(name = fileName, data = batch))
+    fun sendImagesBatch(archive: File) {
+        filesWaiting.add(archive)
         executorService.execute { flushImages() }
     }
 }
