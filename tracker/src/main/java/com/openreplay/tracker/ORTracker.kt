@@ -94,7 +94,6 @@ object OpenReplay {
                     val activeNetworkInfo = connectivityManager.activeNetworkInfo
                     if (activeNetworkInfo != null && activeNetworkInfo.isConnected) {
                         // Call your method to handle connectivity change
-                        sessionStartTs = Date().time
                         startSession(onStarted)
                     }
                 }
@@ -107,21 +106,17 @@ object OpenReplay {
         when {
             capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
                     capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) && !options.wifiOnly -> {
-                sessionStartTs = Date().time
                 startSession(onStarted)
             }
         }
     }
 
     private fun startSession(onStarted: () -> Unit) {
+        sessionStartTs = Date().time
         setupGestureDetector(appContext!!)
         SessionRequest.create(appContext!!, false) { sessionResponse ->
             sessionResponse ?: return@create println("Openreplay: no response from /start request")
             MessageCollector.start()
-
-            val captureSettings =
-                getCaptureSettings(fps = 1, quality = this.options.screenshotQuality)
-            ScreenshotManager.setSettings(settings = captureSettings)
 
             with(options) {
                 if (logs) LogsListener.start()
@@ -130,7 +125,15 @@ object OpenReplay {
                     Crash.start()
                 }
                 if (performances) PerformanceListener.getInstance(appContext!!).start()
-                if (screen) ScreenshotManager.start(appContext!!, sessionStartTs)
+                if (screen) {
+                    ScreenshotManager.setSettings(
+                        settings = getCaptureSettings(
+                            fps = 1,
+                            quality = options.screenshotQuality
+                        )
+                    )
+                    ScreenshotManager.start(appContext!!, sessionStartTs)
+                }
                 if (analytics) Analytics.start()
             }
             onStarted()
@@ -162,9 +165,12 @@ object OpenReplay {
                 }
                 if (performances) PerformanceListener.getInstance(appContext!!).start()
                 if (screen) {
-                    val captureSettings =
-                        getCaptureSettings(fps = 1, quality = options.screenshotQuality)
-                    ScreenshotManager.setSettings(settings = captureSettings)
+                    ScreenshotManager.setSettings(
+                        settings = getCaptureSettings(
+                            fps = 1,
+                            quality = OpenReplay.options.screenshotQuality
+                        )
+                    )
                     ScreenshotManager.start(appContext!!, sessionStartTs)
                 }
                 if (analytics) Analytics.start()
