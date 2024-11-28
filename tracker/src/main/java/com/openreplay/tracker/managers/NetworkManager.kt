@@ -1,17 +1,25 @@
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.openreplay.tracker.OpenReplay
-import com.openreplay.tracker.managers.*
+import com.openreplay.tracker.managers.ApiResponse
+import com.openreplay.tracker.managers.DebugUtils
+import com.openreplay.tracker.managers.UserDefaults
 import com.openreplay.tracker.models.SessionResponse
-import okhttp3.*
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.util.*
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPOutputStream
 
@@ -36,7 +44,7 @@ object NetworkManager {
             .build()
     }
 
-    private fun callAPI(
+    private fun asyncCallAPI(
         request: Request, onSuccess: (Response) -> Unit, onError: (Exception?) -> Unit
     ) {
         if (writeToFile) return
@@ -56,6 +64,15 @@ object NetworkManager {
         })
     }
 
+    private fun callAPI(request: Request) {
+        if (writeToFile) return
+        try {
+            client.newCall(request).execute()
+        } catch (e: Exception) {
+            DebugUtils.log(e.printStackTrace().toString())
+        }
+    }
+
     fun createSession(params: Map<String, Any>, completion: (SessionResponse?) -> Unit) {
         if (writeToFile) {
             this.token = "writeToFile"
@@ -67,12 +84,13 @@ object NetworkManager {
         val requestBody = json.toRequestBody(mediaType)
         val request = createRequest("POST", START_URL, requestBody)
 
-        callAPI(request, onSuccess = { response ->
+        asyncCallAPI(request, onSuccess = { response ->
             val body = response.body.string()
             try {
                 val sessionResponse = Gson().fromJson(body, SessionResponse::class.java)
                 this.token = sessionResponse.token
-                this.sessionId = sessionResponse.sessionID // Ensure this matches the property name in SessionResponse
+                this.sessionId =
+                    sessionResponse.sessionID // Ensure this matches the property name in SessionResponse
                 this.projectId = sessionResponse.projectID
                 println("Session created with ID: ${sessionResponse.sessionID}")
                 completion(sessionResponse) // Pass the session object on success
@@ -106,7 +124,8 @@ object NetworkManager {
         val mediaType = "application/octet-stream".toMediaTypeOrNull()
         val requestBody = compressedContent.toRequestBody(mediaType)
 
-        val request = Request.Builder().url(baseUrl.trimEnd('/') + "/" + INGEST_URL.trimStart('/')).post(requestBody)
+        val request = Request.Builder().url(baseUrl.trimEnd('/') + "/" + INGEST_URL.trimStart('/'))
+            .post(requestBody)
             .addHeader("Authorization", token).addHeader("Content-Encoding", "gzip").build()
 
         OkHttpClient().newCall(request).enqueue(object : Callback {
@@ -138,7 +157,6 @@ object NetworkManager {
     }
 
     fun sendLateMessage(content: ByteArray, completion: (Boolean) -> Unit) {
-//        println(">>>sending late messages")
         val token = UserDefaults.lastToken ?: run {
             println("! No last token found")
             completion(false)
@@ -148,15 +166,17 @@ object NetworkManager {
             method = "POST", path = LATE_URL, body = content.toRequestBody()
         ).newBuilder().addHeader("Authorization", "Bearer $token").build()
 
-        callAPI(request, onSuccess = {
-            completion(true)
-            println("<<< late messages sent")
-        }, onError = {
-            completion(false)
-        })
+        callAPI(request)
+        completion(true)
+        println("<<< late messages sent")
     }
 
-    fun sendImages(projectKey: String, images: ByteArray, name: String, completion: (Boolean) -> Unit) {
+    fun sendImages(
+        projectKey: String,
+        images: ByteArray,
+        name: String,
+        completion: (Boolean) -> Unit
+    ) {
         val token = this.token // Assuming 'token' is a property of your class
         if (token == null) {
             completion(false)
@@ -170,19 +190,18 @@ object NetworkManager {
 
         // Assuming 'images' is the byte array you want to upload
         requestBodyBuilder.addFormDataPart(
-            "batch", name, images.toRequestBody("application/gzip".toMediaTypeOrNull(), 0, images.size)
+            "batch",
+            name,
+            images.toRequestBody("application/gzip".toMediaTypeOrNull(), 0, images.size)
         )
 
         val request = createRequest(
             method = "POST", path = IMAGES_URL, body = requestBodyBuilder.build()
         ).newBuilder().addHeader("Authorization", "Bearer $token").build()
 
-
-        callAPI(request, onSuccess = {
-            completion(true)
-        }, onError = {
-            completion(false)
-        })
+        callAPI(request)
+        completion(true)
+        println("<<< late images sent")
     }
 
     fun sendImagesBatch(
@@ -197,13 +216,18 @@ object NetworkManager {
         }
 
         val requestBody = MultipartBody.Builder().setType(MultipartBody.FORM)
-            .addFormDataPart("batch", archiveName, gzData.toRequestBody("application/gzip".toMediaTypeOrNull())).build()
+            .addFormDataPart(
+                "batch",
+                archiveName,
+                gzData.toRequestBody("application/gzip".toMediaTypeOrNull())
+            ).build()
 
         val request =
-            createRequest("POST", IMAGES_URL, requestBody).newBuilder().addHeader("Authorization", "Bearer $token")
+            createRequest("POST", IMAGES_URL, requestBody).newBuilder()
+                .addHeader("Authorization", "Bearer $token")
                 .build()
 
-        callAPI(request, onSuccess = {
+        asyncCallAPI(request, onSuccess = {
             completion(true)
         }, onError = {
             completion(false)
@@ -237,12 +261,13 @@ object NetworkManager {
                 .addHeader("Authorization", "Bearer $token")
                 .build()
 
-        callAPI(request, onSuccess = { response ->
+        asyncCallAPI(request, onSuccess = { response ->
             response.body.string().let { responseBody ->
                 try {
                     val gson = Gson()
                     val type = object : TypeToken<Map<String, List<ApiResponse>>>() {}.type
-                    val jsonResponse = gson.fromJson<Map<String, List<ApiResponse>>>(responseBody, type)
+                    val jsonResponse =
+                        gson.fromJson<Map<String, List<ApiResponse>>>(responseBody, type)
                     val conditions = jsonResponse["conditions"]
                     if (conditions != null) {
                         completion(conditions)

@@ -13,37 +13,11 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
-data class BatchArch(
-    var name: String,
-    var data: ByteArray
-) {
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-
-        other as BatchArch
-
-        if (name != other.name) return false
-        if (!data.contentEquals(other.data)) return false
-
-        return true
-    }
-
-    override fun hashCode(): Int {
-        var result = name.hashCode()
-        result = 31 * result + data.contentHashCode()
-        return result
-    }
-}
-
 object MessageCollector {
-    private val imagesWaiting = mutableListOf<BatchArch>()
-    private val imagesSending = mutableListOf<BatchArch>()
     private var messagesWaiting = mutableListOf<ByteArray>()
     private val messagesWaitingBackup = mutableListOf<ByteArray>()
     private var nextMessageIndex = 0
     private var sendingLastMessages = false
-    private var sendingLastImages = false
     private val maxMessagesSize = 500_000
     private var lateMessagesFile: File? = null
     private var sendInterval: Handler? = null
@@ -72,11 +46,9 @@ object MessageCollector {
 
     fun start() {
         this.lateMessagesFile = OpenReplay.getLateMessagesFile()
-
         sendIntervalFuture = executorService.scheduleWithFixedDelay({
             executorService.execute {
                 flushMessages()
-                flushImages()
             }
         }, 0, 5, TimeUnit.SECONDS)
 
@@ -143,39 +115,12 @@ object MessageCollector {
         }
     }
 
-    private fun flushImages() {
-        synchronized(this) {
-            if (imagesWaiting.isNotEmpty()) {
-                val images = imagesWaiting.removeAt(0)
-                imagesSending.add(images)
-
-                DebugUtils.log("Sending images ${images.name} ${images.data.size}")
-                NetworkManager.sendImages(
-                    OpenReplay.projectKey!!,
-                    images.data,
-                    images.name
-                ) { success ->
-                    imagesSending.removeAll { it.name == images.name }
-                    if (!success) {
-                        imagesWaiting.add(
-                            0,
-                            images
-                        ) // Re-add to the start of the queue if not successful
-                    } else if (sendingLastImages) {
-                        sendingLastImages = false
-                    }
-                }
-            }
-        }
-    }
-
     fun sendMessage(message: ORMessage) {
         if (OpenReplay.bufferingMode) {
             ConditionsManager.processMessage(message)?.let { trigger ->
                 OpenReplay.triggerRecording(trigger)
             }
         }
-        val data = message.contentData()
         if (OpenReplay.options.debugLogs) {
             if (!message.toString().contains("IOSLog") && !message.toString()
                     .contains("IOSNetworkCall")
@@ -186,7 +131,7 @@ object MessageCollector {
                 DebugUtils.log("-->> IOSNetworkCall(105): ${networkCallMessage.method} ${networkCallMessage.URL}")
             }
         }
-        sendRawMessage(data)
+        sendRawMessage(data = message.contentData())
     }
 
     fun syncBuffers() {
@@ -264,22 +209,9 @@ object MessageCollector {
 
     private fun terminate() {
         if (sendingLastMessages) return
-
         executorService.execute {
             sendingLastMessages = true
             flushMessages()
         }
-
-        if (sendingLastImages) return
-
-        executorService.execute {
-            sendingLastImages = true
-            flushImages()
-        }
-    }
-
-    fun sendImagesBatch(batch: ByteArray, fileName: String) {
-        imagesWaiting.add(BatchArch(name = fileName, data = batch))
-        executorService.execute { flushImages() }
     }
 }
