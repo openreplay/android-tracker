@@ -13,25 +13,10 @@ import kotlin.math.abs
 
 object SessionRequest {
     private var params = mutableMapOf<String, Any>()
+    private var sessionId: String? = null
 
     fun create(context: Context, doNotRecord: Boolean, completion: (SessionResponse?) -> Unit) {
-//        val projectKey = OpenReplay.projectKey
-//        val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
-//        val batteryLevel = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-//        val batteryStatus = batteryManager.getIntProperty(BatteryManager.BATTERY_STATUS_UNKNOWN)
         val resolution = getDeviceResolution(context)
-
-//        val performances = mapOf(
-//            "physicalMemory" to Runtime.getRuntime().maxMemory(),
-//            "processorCount" to Runtime.getRuntime().availableProcessors().toLong(),
-//            "systemUptime" to SystemClock.uptimeMillis(),
-//            "isLowPowerModeEnabled" to 0L,
-//            "batteryLevel" to batteryLevel,
-//            "batteryState" to batteryStatus,
-//            "orientation" to context.resources.configuration.orientation,
-//        )
-
-//        val deviceName = Build.MODEL ?: "Unknown"
         val deviceModel = Build.DEVICE ?: "Unknown"
         val deviceType = if (isTablet(context)) "tablet" else "mobile"
 
@@ -55,42 +40,26 @@ object SessionRequest {
     }
 
     private fun getDeviceResolution(context: Context): Pair<Int, Int> {
-        val metrics = DisplayMetrics()
         val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // For Android R and above
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val windowMetrics = windowManager.currentWindowMetrics
             val bounds = windowMetrics.bounds
-            val width = bounds.width()
-            val height = bounds.height()
-            return Pair(width, height)
+            Pair(bounds.width(), bounds.height())
         } else {
-            // For older versions
+            val metrics = DisplayMetrics()
+
             @Suppress("DEPRECATION")
             val display = windowManager.defaultDisplay
             @Suppress("DEPRECATION")
             display.getMetrics(metrics)
-            val width = metrics.widthPixels
-            val height = metrics.heightPixels
-            return Pair(width, height)
+            Pair(metrics.widthPixels, metrics.heightPixels)
         }
     }
 
-//    fun isTablet(context: Context): Boolean {
-//        val displayMetrics = context.resources.displayMetrics
-//        val widthDp = displayMetrics.widthPixels / displayMetrics.density
-//        val heightDp = displayMetrics.heightPixels / displayMetrics.density
-//        val screenDiagonalDp = sqrt((widthDp * widthDp + heightDp * heightDp).toDouble()).toInt()
-//        return screenDiagonalDp >= 600 // Threshold for considering a device as a tablet
-//    }
-
     fun isTablet(context: Context): Boolean {
         val configuration = context.resources.configuration
-        val smallestScreenWidthDp = configuration.smallestScreenWidthDp
-        return smallestScreenWidthDp >= 600
+        return configuration.smallestScreenWidthDp >= 600
     }
-
 
     private fun callAPI(completion: (SessionResponse?) -> Unit) {
         if (params.isEmpty()) return
@@ -101,12 +70,16 @@ object SessionRequest {
                 }, 5000)
                 return@createSession
             }
-            DebugUtils.log(">>>> Starting session : ${sessionResponse.sessionID}")
+            sessionId = sessionResponse.sessionID
+            DebugUtils.log(">>>> Starting session : $sessionId")
             completion(sessionResponse)
         }
     }
-}
 
+    fun getSessionId(): String? {
+        return sessionId
+    }
+}
 
 data class SessionResponse(
     val userUUID: String,

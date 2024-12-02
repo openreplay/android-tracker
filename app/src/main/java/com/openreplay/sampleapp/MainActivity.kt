@@ -51,7 +51,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startOpenReplay() {
         OpenReplay.setupGestureDetector(this)
-        OpenReplay.serverURL = BuildConfig.SERVER_URL
+        // OpenReplay.serverURL = BuildConfig.SERVER_URL
         OpenReplay.setUserID("TEST")
         OpenReplay.start(
             context = this,
@@ -59,6 +59,9 @@ class MainActivity : AppCompatActivity() {
             options = OROptions.defaults,
             onStarted = {
                 OpenReplay.event("Test Event", User("John Doe", 25))
+
+                val id = OpenReplay.getSessionID()
+                OpenReplay.event("Session ID", id)
             }
         )
     }

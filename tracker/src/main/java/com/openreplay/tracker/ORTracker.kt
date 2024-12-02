@@ -317,6 +317,10 @@ object OpenReplay {
     fun onTouchEvent(event: MotionEvent) {
         this.gestureDetector?.onTouchEvent(event)
     }
+
+    fun getSessionID(): String {
+        return SessionRequest.getSessionId() ?: ""
+    }
 }
 
 fun getCaptureSettings(fps: Int, quality: RecordingQuality): Triple<Int, Int, Int> {
