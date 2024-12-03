@@ -7,6 +7,8 @@ import java.io.IOException
 import java.io.PipedInputStream
 import java.io.PipedOutputStream
 import java.io.PrintStream
+import java.util.concurrent.BlockingQueue
+import java.util.concurrent.LinkedBlockingQueue
 import kotlin.concurrent.thread
 
 object LogsListener {
@@ -29,41 +31,64 @@ object LogsListener {
     ) {
         private val inputPipe = PipedInputStream()
         private val outputPipe = PipedOutputStream()
+        private val logQueue: BlockingQueue<String> = LinkedBlockingQueue()
+        @Volatile
+        private var isRunning = false
 
         init {
             try {
                 inputPipe.connect(outputPipe)
             } catch (e: IOException) {
-                DebugUtils.log(e.toString())
-            }
-            thread {
-                try {
-                    val buffer = ByteArray(1024)
-                    while (true) {
-                        val bytesRead = inputPipe.read(buffer)
-                        if (bytesRead != -1) {
-                            val data = String(buffer, 0, bytesRead, Charsets.UTF_8)
-                            val message = ORMobileLog(severity = severity, content = data)
-                            MessageCollector.sendMessage(message)
-                            originalStream.write(buffer, 0, bytesRead)
-                        }
-                    }
-                } catch (e: IOException) {
-                    DebugUtils.log(e.toString())
-                }
+                DebugUtils.log("Error connecting pipes: ${e.message}")
             }
         }
 
         fun start() {
+            isRunning = true
             val printStream = PrintStream(outputPipe, true)
             if (severity == "info") {
                 System.setOut(printStream)
             } else {
                 System.setErr(printStream)
             }
+
+            // Thread to read and queue logs
+            thread(name = "LogReaderThread-$severity") {
+                val buffer = ByteArray(1024)
+                try {
+                    while (isRunning) {
+                        if (inputPipe.available() > 0) {
+                            val bytesRead = inputPipe.read(buffer)
+                            if (bytesRead > 0) {
+                                val data = String(buffer, 0, bytesRead, Charsets.UTF_8)
+                                logQueue.put(data) // Enqueue logs
+                            }
+                        }
+                    }
+                } catch (e: IOException) {
+                    if (isRunning) {
+                        DebugUtils.log("Error reading logs: ${e.message}")
+                    }
+                }
+            }
+
+            // Thread to process and send logs
+            thread(name = "LogProcessorThread-$severity") {
+                try {
+                    while (isRunning) {
+                        val log = logQueue.take() // Dequeue logs
+                        val message = ORMobileLog(severity = severity, content = log)
+                        MessageCollector.sendMessage(message)
+                        originalStream.println(log) // Forward to original stream
+                    }
+                } catch (e: InterruptedException) {
+                    DebugUtils.log("Log processing interrupted: ${e.message}")
+                }
+            }
         }
 
         fun stop() {
+            isRunning = false
             if (severity == "info") {
                 System.setOut(originalStream)
             } else {
@@ -73,7 +98,7 @@ object LogsListener {
                 inputPipe.close()
                 outputPipe.close()
             } catch (e: IOException) {
-                DebugUtils.log(e.toString())
+                DebugUtils.log("Error closing pipes: ${e.message}")
             }
         }
     }

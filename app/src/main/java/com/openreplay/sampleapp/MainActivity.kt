@@ -56,7 +56,7 @@ class MainActivity : AppCompatActivity() {
         OpenReplay.start(
             context = this,
             projectKey = BuildConfig.PROJECT_KEY,
-            options = OROptions.defaults,
+            options = OROptions(screen = true, logs = true, wifiOnly = false),
             onStarted = {
                 OpenReplay.event("Test Event", User("John Doe", 25))
 

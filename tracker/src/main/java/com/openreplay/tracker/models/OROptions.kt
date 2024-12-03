@@ -12,7 +12,7 @@ class OROptions(
     val crashes: Boolean = true,
     val analytics: Boolean = true,
     val performances: Boolean = true,
-    val logs: Boolean = true,
+    val logs: Boolean = false,
     val screen: Boolean = true,
     val wifiOnly: Boolean = true,
     val debugLogs: Boolean = false,
