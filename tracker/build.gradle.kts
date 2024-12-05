@@ -48,7 +48,6 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
-    implementation(libs.okhttp)
     implementation(libs.gson)
     implementation(libs.commons.compress)
     implementation(libs.kotlin.stdlib)

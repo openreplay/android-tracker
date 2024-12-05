@@ -66,6 +66,7 @@ object OpenReplay {
 
 
     fun start(context: Context, projectKey: String, options: OROptions, onStarted: () -> Unit) {
+        NetworkManager.initialize(context)
         UserDefaults.init(context)
         this.appContext = context // Use application context to avoid leaks
         this.options = this.options.merge(options)
@@ -145,6 +146,7 @@ object OpenReplay {
     }
 
     fun coldStart(context: Context, projectKey: String, options: OROptions, onStarted: () -> Unit) {
+        NetworkManager.initialize(context)
         this.appContext = context // Use application context to avoid leaks
         this.options = options
         this.projectKey = projectKey
