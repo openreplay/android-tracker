@@ -105,6 +105,11 @@ object Analytics {
 //            true
 //        }
     }
+
+    fun sendBackgroundEvent(value: ULong) {
+        val message = ORMobilePerformanceEvent("background", value)
+        MessageCollector.sendMessage(message)
+    }
 }
 
 open class TrackingActivity : AppCompatActivity() {

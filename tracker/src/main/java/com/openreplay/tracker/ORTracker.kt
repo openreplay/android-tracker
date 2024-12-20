@@ -2,6 +2,7 @@ package com.openreplay.tracker
 
 import NetworkManager
 import android.app.Activity
+import android.app.Application
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -9,6 +10,7 @@ import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
+import android.os.Bundle
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
@@ -25,6 +27,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.google.gson.Gson
 import com.openreplay.tracker.listeners.Analytics
 import com.openreplay.tracker.listeners.Crash
+import com.openreplay.tracker.listeners.LifecycleManager
 import com.openreplay.tracker.listeners.LogsListener
 import com.openreplay.tracker.listeners.ORGestureListener
 import com.openreplay.tracker.listeners.PerformanceListener
@@ -54,6 +57,7 @@ object OpenReplay {
     var sessionStartTs: Long = 0
     var bufferingMode = false
     var options: OROptions = OROptions.defaults
+    private var lifecycleManager: LifecycleManager? = null
 
     var serverURL: String
         get() = NetworkManager.baseUrl
@@ -112,11 +116,15 @@ object OpenReplay {
         }
     }
 
-    private fun startSession(onStarted: () -> Unit) {
+    fun startSession(onStarted: () -> Unit) {
         sessionStartTs = Date().time
         setupGestureDetector(appContext!!)
         SessionRequest.create(appContext!!, false) { sessionResponse ->
             sessionResponse ?: return@create println("Openreplay: no response from /start request")
+
+            if (this.lifecycleManager == null) {
+                this.lifecycleManager = LifecycleManager(appContext!!)
+            }
             MessageCollector.start()
 
             with(options) {
@@ -207,13 +215,16 @@ object OpenReplay {
         }
     }
 
-    fun stop() {
+    fun stop(closeSession: Boolean = true) {
         ScreenshotManager.stop()
         Analytics.stop()
         LogsListener.stop()
         PerformanceListener.getInstance(appContext!!).stop()
         Crash.stop()
         MessageCollector.stop()
+        if (closeSession) {
+            SessionRequest.clear()
+        }
     }
 
     fun setUserID(userID: String) {
@@ -251,9 +262,9 @@ object OpenReplay {
         requestJSON: String,
         responseJSON: String,
         status: Int,
-        duration: ULong
+        duration: Long
     ) {
-        sendNetworkMessage(url, method, requestJSON, responseJSON, status, duration.toLong())
+        sendNetworkMessage(url, method, requestJSON, responseJSON, status, duration)
     }
 
     fun eventStr(name: String, jsonPayload: String) {

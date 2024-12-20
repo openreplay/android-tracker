@@ -104,8 +104,8 @@ fun sendNetworkMessage(
         URL = url,
         request = requestJSON,
         response = responseJSON,
-        status = status.toULong(),
-        duration = duration.toULong()
+        status = status,
+        duration = duration
     )
 
     MessageCollector.sendMessage(message)

@@ -122,13 +122,13 @@ object MessageCollector {
             }
         }
         if (OpenReplay.options.debugLogs) {
-            if (!message.toString().contains("IOSLog") && !message.toString()
-                    .contains("IOSNetworkCall")
+            if (!message.toString().contains("Log") && !message.toString()
+                    .contains("NetworkCall")
             ) {
                 DebugUtils.log(message.toString())
             }
             (message as? ORMobileNetworkCall)?.let { networkCallMessage ->
-                DebugUtils.log("-->> IOSNetworkCall(105): ${networkCallMessage.method} ${networkCallMessage.URL}")
+                DebugUtils.log("-->> MobileNetworkCall(105): ${networkCallMessage.method} ${networkCallMessage.URL}")
             }
         }
         sendRawMessage(data = message.contentData())

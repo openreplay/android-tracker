@@ -10,75 +10,100 @@ import java.io.Serializable
 import com.openreplay.tracker.managers.DebugUtils
 import com.openreplay.tracker.managers.UserDefaults
 import kotlin.math.abs
+import java.util.concurrent.atomic.AtomicReference
 
 object SessionRequest {
-    private var params = mutableMapOf<String, Any>()
-    private var sessionId: String? = null
+    private val params = mutableMapOf<String, Any>()
+    private val sessionId = AtomicReference<String?>()
+    private val cachedSessionResponse = AtomicReference<SessionResponse?>()
+    private const val RETRY_DELAY_MS = 5000
+    private const val MAX_RETRIES = 5
+    private var retryCount = 0
 
     fun create(context: Context, doNotRecord: Boolean, completion: (SessionResponse?) -> Unit) {
+        // Return cached session if already present
+        cachedSessionResponse.get()?.let {
+            completion(it)
+            return
+        }
+
+        initializeParams(context, doNotRecord)
+        callAPI(completion)
+    }
+
+    fun clear() {
+        sessionId.set(null)
+        cachedSessionResponse.set(null)
+    }
+
+    private fun initializeParams(context: Context, doNotRecord: Boolean) {
         val resolution = getDeviceResolution(context)
         val deviceModel = Build.DEVICE ?: "Unknown"
         val deviceType = if (isTablet(context)) "tablet" else "mobile"
 
-        params = mutableMapOf(
-            "platform" to "android",
-            "width" to resolution.first,
-            "height" to resolution.second,
-            "doNotRecord" to doNotRecord,
-            "projectKey" to OpenReplay.projectKey!!,
-            "trackerVersion" to OpenReplay.options.pkgVersion,
-            "revID" to "N/A",
-            "userUUID" to UserDefaults.userUUID,
-            "userOSVersion" to Build.VERSION.RELEASE,
-            "userDevice" to deviceModel,
-            "userDeviceType" to deviceType,
-            "timestamp" to Date().time,
-            "deviceMemory" to Runtime.getRuntime().maxMemory() / 1024,
-            "timezone" to getTimezone()
-        )
-        callAPI(completion)
+        params.apply {
+            clear()
+            put("platform", "android")
+            put("width", resolution.first)
+            put("height", resolution.second)
+            put("doNotRecord", doNotRecord)
+            put("projectKey", OpenReplay.projectKey!!)
+            put("trackerVersion", OpenReplay.options.pkgVersion)
+            put("revID", "N/A")
+            put("userUUID", UserDefaults.userUUID)
+            put("userOSVersion", Build.VERSION.RELEASE)
+            put("userDevice", deviceModel)
+            put("userDeviceType", deviceType)
+            put("timestamp", Date().time)
+            put("deviceMemory", Runtime.getRuntime().maxMemory() / 1024)
+            put("timezone", getTimezone())
+        }
     }
 
     private fun getDeviceResolution(context: Context): Pair<Int, Int> {
         val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val windowMetrics = windowManager.currentWindowMetrics
-            val bounds = windowMetrics.bounds
+            val bounds = windowManager.currentWindowMetrics.bounds
             Pair(bounds.width(), bounds.height())
         } else {
             val metrics = DisplayMetrics()
-
             @Suppress("DEPRECATION")
-            val display = windowManager.defaultDisplay
-            @Suppress("DEPRECATION")
-            display.getMetrics(metrics)
+            windowManager.defaultDisplay.getMetrics(metrics)
             Pair(metrics.widthPixels, metrics.heightPixels)
         }
     }
 
-    fun isTablet(context: Context): Boolean {
-        val configuration = context.resources.configuration
-        return configuration.smallestScreenWidthDp >= 600
+    private fun isTablet(context: Context): Boolean {
+        return context.resources.configuration.smallestScreenWidthDp >= 600
     }
 
     private fun callAPI(completion: (SessionResponse?) -> Unit) {
         if (params.isEmpty()) return
+
         NetworkManager.createSession(params) { sessionResponse ->
-            if (sessionResponse == null) {
-                Handler(Looper.getMainLooper()).postDelayed({
-                    callAPI(completion)
-                }, 5000)
-                return@createSession
+            when {
+                sessionResponse != null -> {
+                    sessionId.set(sessionResponse.sessionID)
+                    cachedSessionResponse.set(sessionResponse)
+                    retryCount = 0 // Reset retry count
+                    DebugUtils.log(">>>> Starting session : ${sessionResponse.sessionID}")
+                    completion(sessionResponse)
+                }
+                retryCount < MAX_RETRIES -> {
+                    retryCount++
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        callAPI(completion)
+                    }, RETRY_DELAY_MS.toLong())
+                }
+                else -> {
+                    DebugUtils.log(">>>> Failed to start session after $MAX_RETRIES retries")
+                    completion(null)
+                }
             }
-            sessionId = sessionResponse.sessionID
-            DebugUtils.log(">>>> Starting session : $sessionId")
-            completion(sessionResponse)
         }
     }
 
-    fun getSessionId(): String? {
-        return sessionId
-    }
+    fun getSessionId(): String? = sessionId.get()
 }
 
 data class SessionResponse(

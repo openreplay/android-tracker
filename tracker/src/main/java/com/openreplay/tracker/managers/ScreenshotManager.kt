@@ -43,7 +43,6 @@ import java.util.zip.GZIPOutputStream
 import kotlin.coroutines.suspendCoroutine
 
 object ScreenshotManager {
-
     private var lastTs: String = ""
     private var firstTs: String = ""
     private var sanitizedElements: MutableList<View> = mutableListOf()
@@ -108,7 +107,7 @@ object ScreenshotManager {
             try {
                 val archives = getArchiveFolder().listFiles().orEmpty()
                 if (archives.isEmpty()) return@coroutineScope
-                DebugUtils.log("send archives size:${archives.size}")
+                DebugUtils.log("sending archives size: ${archives.size}")
                 archives.forEach { archive ->
                     NetworkManager.sendImages(
                         projectKey = OpenReplay.projectKey!!,
@@ -132,12 +131,12 @@ object ScreenshotManager {
         // create picture
         coroutineScope {
             try {
-                DebugUtils.log("make screenshot")
+                // DebugUtils.log("make screenshot")
                 val screenShotBitmap = withContext(Dispatchers.Main) { captureScreenshot() }
                 // get or create folder
                 val screenShotFolder = getScreenshotFolder()
                 val screenShotFile = File(screenShotFolder, "${System.currentTimeMillis()}.jpeg")
-                DebugUtils.log("save screenshot")
+                // DebugUtils.log("save screenshot")
                 // save screen shot
                 FileOutputStream(screenShotFile).use { out -> out.write(compress(screenShotBitmap)) }
                 // make archive for $chunk pictures

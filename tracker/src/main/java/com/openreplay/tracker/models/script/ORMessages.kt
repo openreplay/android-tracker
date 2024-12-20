@@ -198,8 +198,8 @@ class ORMobileNetworkCall(
     val URL: String,
     val request: String,
     val response: String,
-    val status: ULong,
-    val duration: ULong,
+    val status: Int,
+    val duration: Long,
 ) : ORMessage(ORMessageType.MobileNetworkCall) {
 
     override fun contentData(): ByteArray {

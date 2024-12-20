@@ -248,7 +248,7 @@ object NetworkManager {
         )
 
         asyncCallAPI(request, onSuccess = {
-            println("Images sent successfully.")
+            DebugUtils.log("Images sent successfully")
             completion(true)
         }, onError = {
             println("Failed to send images: ${it?.message}")
