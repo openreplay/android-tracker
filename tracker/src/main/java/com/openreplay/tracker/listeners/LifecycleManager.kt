@@ -24,7 +24,7 @@ class LifecycleManager(
     }
 
     override fun onActivityStarted(activity: Activity) {
-        Analytics.sendBackgroundEvent(1u) // Send foreground event
+        Analytics.sendBackgroundEvent(0u) // Send foreground event
         OpenReplay.startSession(
             onStarted = {
                 DebugUtils.log("OpenReplay session resumed")
@@ -41,7 +41,7 @@ class LifecycleManager(
     }
 
     override fun onActivityStopped(activity: Activity) {
-        Analytics.sendBackgroundEvent(0u) // Send background event
+        Analytics.sendBackgroundEvent(1u) // Send background event
         OpenReplay.stop(false)
     }
 
