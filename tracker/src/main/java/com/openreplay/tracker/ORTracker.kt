@@ -128,12 +128,6 @@ object OpenReplay {
             MessageCollector.start()
 
             with(options) {
-                if (logs) LogsListener.start()
-                if (crashes) {
-                    Crash.init(appContext!!)
-                    Crash.start()
-                }
-                if (performances) PerformanceListener.getInstance(appContext!!).start()
                 if (screen) {
                     ScreenshotManager.setSettings(
                         settings = getCaptureSettings(
@@ -143,6 +137,12 @@ object OpenReplay {
                     )
                     ScreenshotManager.start(appContext!!, sessionStartTs)
                 }
+                if (logs) LogsListener.start()
+                if (crashes) {
+                    Crash.init(appContext!!)
+                    Crash.start()
+                }
+                if (performances) PerformanceListener.getInstance(appContext!!).start()
                 if (analytics) Analytics.start()
             }
             onStarted()
@@ -168,12 +168,6 @@ object OpenReplay {
             onStarted()
 
             with(this.options) {
-                if (logs) LogsListener.start()
-                if (crashes) {
-                    Crash.init(appContext!!)
-                    Crash.start()
-                }
-                if (performances) PerformanceListener.getInstance(appContext!!).start()
                 if (screen) {
                     ScreenshotManager.setSettings(
                         settings = getCaptureSettings(
@@ -183,6 +177,12 @@ object OpenReplay {
                     )
                     ScreenshotManager.start(appContext!!, sessionStartTs)
                 }
+                if (logs) LogsListener.start()
+                if (crashes) {
+                    Crash.init(appContext!!)
+                    Crash.start()
+                }
+                if (performances) PerformanceListener.getInstance(appContext!!).start()
                 if (analytics) Analytics.start()
             }
         }
