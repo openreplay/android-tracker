@@ -72,7 +72,7 @@ open class NetworkListener {
         val status = connection?.responseCode ?: 0
         val duration = endTime - startTime
 
-        sendNetworkMessage(url, method, requestJSON, responseJSON, status, duration)
+        sendNetworkMessage(url, method, requestJSON, responseJSON, status, duration.toULong())
     }
 
     private fun sanitizeHeaders(headers: Map<String, String>?): Map<String, String>? {
@@ -96,7 +96,7 @@ fun sendNetworkMessage(
     requestJSON: String,
     responseJSON: String,
     status: Int,
-    duration: Long
+    duration: ULong
 ) {
     val message = ORMobileNetworkCall(
         type = "request",

@@ -262,7 +262,7 @@ object OpenReplay {
         requestJSON: String,
         responseJSON: String,
         status: Int,
-        duration: Long
+        duration: ULong
     ) {
         sendNetworkMessage(url, method, requestJSON, responseJSON, status, duration)
     }
