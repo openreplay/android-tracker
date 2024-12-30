@@ -2,7 +2,6 @@ package com.openreplay.tracker
 
 import NetworkManager
 import android.app.Activity
-import android.app.Application
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -10,7 +9,6 @@ import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
-import android.os.Bundle
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
@@ -43,6 +41,9 @@ import com.openreplay.tracker.models.SessionRequest
 import com.openreplay.tracker.models.script.ORMobileEvent
 import com.openreplay.tracker.models.script.ORMobileMetadata
 import com.openreplay.tracker.models.script.ORMobileUserID
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Date
 import kotlin.math.max
@@ -58,6 +59,7 @@ object OpenReplay {
     var bufferingMode = false
     var options: OROptions = OROptions.defaults
     private var lifecycleManager: LifecycleManager? = null
+    private var lateMessagesFile: File? = null
 
     var serverURL: String
         get() = NetworkManager.baseUrl
@@ -71,7 +73,9 @@ object OpenReplay {
 
     fun start(context: Context, projectKey: String, options: OROptions, onStarted: () -> Unit) {
         NetworkManager.initialize(context)
-        UserDefaults.init(context)
+        CoroutineScope(Dispatchers.IO).launch {
+            UserDefaults.init(context)
+        }
         this.appContext = context // Use application context to avoid leaks
         this.options = this.options.merge(options)
         this.projectKey = projectKey
@@ -125,7 +129,7 @@ object OpenReplay {
             if (this.lifecycleManager == null) {
                 this.lifecycleManager = LifecycleManager(appContext!!)
             }
-            MessageCollector.start()
+            MessageCollector.start(appContext!!)
 
             with(options) {
                 if (screen) {
@@ -149,8 +153,11 @@ object OpenReplay {
         }
     }
 
-    fun getLateMessagesFile(): File {
-        return File(appContext!!.cacheDir, "lateMessages.dat")
+    fun getLateMessagesFile(context: Context): File {
+        if (lateMessagesFile == null) {
+            lateMessagesFile = File(context.cacheDir, "lateMessages.dat")
+        }
+        return lateMessagesFile!!
     }
 
     fun coldStart(context: Context, projectKey: String, options: OROptions, onStarted: () -> Unit) {
@@ -159,7 +166,10 @@ object OpenReplay {
         this.options = options
         this.projectKey = projectKey
         this.bufferingMode = true
-        UserDefaults.init(context)
+
+        CoroutineScope(Dispatchers.IO).launch {
+            UserDefaults.init(context)
+        }
 
         SessionRequest.create(appContext!!, false) { sessionResponse ->
             sessionResponse ?: return@create println("Openreplay: no response from /start request")
@@ -196,7 +206,7 @@ object OpenReplay {
         SessionRequest.create(context = appContext!!, doNotRecord = false) { sessionResponse ->
             sessionResponse?.let {
                 MessageCollector.syncBuffers()
-                MessageCollector.start()
+                MessageCollector.start(appContext!!)
             } ?: run {
                 println("Openreplay: no response from /start request")
             }
@@ -204,12 +214,25 @@ object OpenReplay {
     }
 
     private fun checkForLateMessages() {
-        val lateMessagesFile = File(appContext!!.filesDir, "lateMessages.dat")
-        if (lateMessagesFile.exists()) {
-            val crashData = lateMessagesFile.readBytes()
-            NetworkManager.sendLateMessage(crashData) { success ->
-                if (success) {
-                    lateMessagesFile.delete()
+        val context = appContext ?: run {
+            DebugUtils.log("appContext is null. Cannot check for late messages.")
+            return
+        }
+
+        CoroutineScope(Dispatchers.IO).launch {
+            val lateMessagesFile = File(context.filesDir, "lateMessages.dat")
+            if (lateMessagesFile.exists()) {
+                try {
+                    val crashData = lateMessagesFile.readBytes()
+                    NetworkManager.sendLateMessage(crashData) { success ->
+                        if (success) {
+                            CoroutineScope(Dispatchers.IO).launch {
+                                lateMessagesFile.delete()
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    DebugUtils.log("Error processing late messages: ${e.message}")
                 }
             }
         }

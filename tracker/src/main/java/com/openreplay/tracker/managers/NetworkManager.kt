@@ -1,4 +1,5 @@
 import android.content.Context
+import android.net.TrafficStats
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.openreplay.tracker.OpenReplay
@@ -6,6 +7,7 @@ import com.openreplay.tracker.managers.ApiResponse
 import com.openreplay.tracker.managers.DebugUtils
 import com.openreplay.tracker.managers.UserDefaults
 import com.openreplay.tracker.models.SessionResponse
+import kotlinx.coroutines.*
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -21,17 +23,24 @@ object NetworkManager {
     private const val LATE_URL = "/v1/mobile/late"
     private const val IMAGES_URL = "/v1/mobile/images"
     private const val CONDITIONS = "/v1/mobile/conditions"
+    private val networkScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     var baseUrl = "https://api.openreplay.com/ingest"
-    var sessionId: String? = null
-    var projectId: String? = null
-    private var token: String? = null
-    private var writeToFile = false
 
+    @Volatile
+    var sessionId: String? = null
+
+    @Volatile
+    var projectId: String? = null
+
+    @Volatile
+    private var token: String? = null
+
+    private var writeToFile = false
     private lateinit var appContext: Context
 
     fun initialize(context: Context) {
-        appContext = context.applicationContext // Use application context to avoid leaks
+        appContext = context.applicationContext // Avoid memory leaks
     }
 
     fun getAppContext(): Context {
@@ -41,219 +50,223 @@ object NetworkManager {
         return appContext
     }
 
-    private fun createRequest(
+    private suspend fun createRequest(
         method: String,
         path: String,
         body: ByteArray? = null,
         headers: Map<String, String>? = null
-    ): HttpURLConnection {
+    ): HttpURLConnection = withContext(Dispatchers.IO) {
         val url = URL(baseUrl + path)
         val connection = url.openConnection() as HttpURLConnection
-        connection.requestMethod = method
-        connection.doInput = true
-        connection.useCaches = false
 
-        // Set headers before any interaction with the streams
-        headers?.forEach { (key, value) ->
-            connection.setRequestProperty(key, value)
-        }
-
-        if (body != null) {
-            connection.doOutput = true
-            connection.outputStream.use { it.write(body) }
-        }
-
-        return connection
-    }
-
-    private fun asyncCallAPI(
-        request: HttpURLConnection,
-        onSuccess: (HttpURLConnection) -> Unit,
-        onError: (Exception?) -> Unit
-    ) {
-        if (writeToFile) return
         try {
-            if (request.responseCode in 200..299) {
-                onSuccess(request)
-            } else {
-                onError(Exception("HTTP error code: ${request.responseCode}"))
+            // Tag the thread for network usage tracking
+            TrafficStats.setThreadStatsTag(1000)
+
+            connection.requestMethod = method
+            connection.doInput = true
+            connection.useCaches = false
+
+            // Add headers to the connection
+            headers?.forEach { (key, value) -> connection.setRequestProperty(key, value) }
+
+            // Add body if it's a POST/PUT request
+            if (body != null) {
+                connection.doOutput = true
+                connection.outputStream.use { outputStream ->
+                    outputStream.write(body)
+                }
             }
         } catch (e: Exception) {
-            onError(e)
+            connection.disconnect() // Disconnect in case of failure
+            throw e
         } finally {
-            request.disconnect()
+            // Clear the thread's TrafficStats tag
+            TrafficStats.clearThreadStatsTag()
         }
+
+        return@withContext connection
     }
 
-    private fun callAPI(request: HttpURLConnection) {
-        if (writeToFile) return
-        try {
-            request.connect()
-        } catch (e: Exception) {
-            DebugUtils.log(e.printStackTrace().toString())
-        } finally {
-            request.disconnect()
-        }
-    }
 
     fun createSession(params: Map<String, Any>, completion: (SessionResponse?) -> Unit) {
-        if (writeToFile) {
-            this.token = "writeToFile"
-            completion(null)
-            return
-        }
-        val json = Gson().toJson(params).toByteArray()
-        val request = createRequest(
-            "POST",
-            START_URL,
-            body = json,
-            headers = mapOf("Content-Type" to "application/json; charset=utf-8")
-        )
-
-        asyncCallAPI(request, onSuccess = { conn ->
-            val body = conn.inputStream.bufferedReader().readText()
-            try {
-                val sessionResponse = Gson().fromJson(body, SessionResponse::class.java)
-                this.token = sessionResponse.token
-                this.sessionId = sessionResponse.sessionID
-                this.projectId = sessionResponse.projectID
-                println("Session created with ID: ${sessionResponse.sessionID}")
-                completion(sessionResponse)
-            } catch (e: Exception) {
-                DebugUtils.log("Can't unwrap session start resp: $e")
-                completion(null)
+        networkScope.launch {
+            if (writeToFile) {
+                token = "writeToFile"
+                withContext(Dispatchers.Main) { completion(null) }
+                return@launch
             }
-        }, onError = {
-            DebugUtils.log("Can't start session: $it")
-            completion(null)
-        })
+
+            val json = Gson().toJson(params).toByteArray()
+
+            try {
+                val request = createRequest(
+                    "POST",
+                    START_URL,
+                    body = json,
+                    headers = mapOf("Content-Type" to "application/json; charset=utf-8")
+                )
+
+                val body = request.inputStream.use { inputStream ->
+                    inputStream.bufferedReader().readText()
+                }
+
+                if (body.isNotEmpty()) {
+                    val sessionResponse = Gson().fromJson(body, SessionResponse::class.java)
+                    token = sessionResponse.token
+                    sessionId = sessionResponse.sessionID
+                    projectId = sessionResponse.projectID
+
+                    withContext(Dispatchers.Main) { completion(sessionResponse) }
+                } else {
+                    DebugUtils.log("Empty response body for createSession")
+                    withContext(Dispatchers.Main) { completion(null) }
+                }
+            } catch (e: Exception) {
+                DebugUtils.log("Error in createSession: ${e.message}")
+                withContext(Dispatchers.Main) { completion(null) }
+            }
+        }
     }
 
     fun sendMessage(content: ByteArray, completion: (Boolean) -> Unit) {
-        if (writeToFile) {
-            appendLocalFile(content) // Pass context to dynamically determine the file path
-            return
-        }
-        val compressedContent = try {
-            compressData(content).also {
-                DebugUtils.log("Compressed ${content.size} bytes to ${it.size} bytes")
+        networkScope.launch {
+            if (writeToFile) {
+                appendLocalFile(content)
+                return@launch
             }
-        } catch (e: Exception) {
-            DebugUtils.log("Error with compression: ${e.message}")
-            content
-        }
 
-        val request = createRequest(
-            "POST",
-            INGEST_URL,
-            body = compressedContent,
-            headers = mapOf(
-                "Authorization" to "Bearer $token",
-                "Content-Encoding" to "gzip",
-                "Content-Type" to "application/octet-stream"
+            val compressedContent = try {
+                compressData(content).also {
+                    DebugUtils.log("Compressed ${content.size} bytes to ${it.size} bytes")
+                }
+            } catch (e: Exception) {
+                DebugUtils.log("Error with compression: ${e.message}")
+                content
+            }
+
+            val request = createRequest(
+                "POST",
+                INGEST_URL,
+                body = compressedContent,
+                headers = mapOf(
+                    "Authorization" to "Bearer $token",
+                    "Content-Encoding" to "gzip",
+                    "Content-Type" to "application/octet-stream"
+                )
             )
-        )
 
-        asyncCallAPI(request, onSuccess = {
-            DebugUtils.log("Message sent successfully")
-            completion(true)
-        }, onError = {
-            DebugUtils.log("Message sending failed: ${it?.message}")
-            completion(false)
-        })
-    }
-
-    fun sendLateMessage(content: ByteArray, completion: (Boolean) -> Unit) {
-        val token = UserDefaults.lastToken ?: run {
-            println("! No last token found")
-            completion(false)
-            return
+            try {
+                request.connect()
+                if (request.responseCode in 200..299) {
+                    DebugUtils.log("Message sent successfully")
+                    withContext(Dispatchers.Main) { completion(true) }
+                } else {
+                    DebugUtils.log("Failed to send message: ${request.responseCode}")
+                    withContext(Dispatchers.Main) { completion(false) }
+                }
+//                DebugUtils.log("Message sent successfully")
+//                withContext(Dispatchers.Main) { completion(true) }
+            } catch (e: Exception) {
+                DebugUtils.log("Message sending failed: ${e.message}")
+                withContext(Dispatchers.Main) { completion(false) }
+            } finally {
+                request.disconnect()
+            }
         }
-
-        val request = createRequest(
-            method = "POST",
-            path = LATE_URL,
-            body = content,
-            headers = mapOf("Authorization" to "Bearer $token")
-        )
-
-        asyncCallAPI(request, onSuccess = {
-            println("<<< Late messages sent successfully")
-            completion(true)
-        }, onError = {
-            println("<<< Failed to send late messages: ${it?.message}")
-            completion(false)
-        })
     }
 
     fun getConditions(completion: (List<ApiResponse>) -> Unit) {
-        val token = this.token ?: run {
-            DebugUtils.log("No token available for getConditions.")
-            completion(emptyList())
-            return
-        }
+        networkScope.launch {
+            val token = this@NetworkManager.token ?: run {
+                DebugUtils.log("No token available for getConditions.")
+                withContext(Dispatchers.Main) { completion(emptyList()) }
+                return@launch
+            }
 
-        val request = createRequest(
-            method = "GET",
-            path = "$CONDITIONS/$projectId",
-            headers = mapOf("Authorization" to "Bearer $token")
-        )
+            val request = createRequest(
+                method = "GET",
+                path = "$CONDITIONS/$projectId",
+                headers = mapOf("Authorization" to "Bearer $token")
+            )
 
-        asyncCallAPI(request, onSuccess = { connection ->
-            val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
             try {
+                request.connect()
+                val responseBody = request.inputStream.use { inputStream ->
+                    inputStream.bufferedReader().readText()
+                }
                 val gson = Gson()
                 val type = object : TypeToken<Map<String, List<ApiResponse>>>() {}.type
-                val jsonResponse =
-                    gson.fromJson<Map<String, List<ApiResponse>>>(responseBody, type)
+                val jsonResponse = gson.fromJson<Map<String, List<ApiResponse>>>(responseBody, type)
                 val conditions = jsonResponse["conditions"] ?: emptyList()
-                completion(conditions)
+                withContext(Dispatchers.Main) { completion(conditions) }
             } catch (e: Exception) {
-                DebugUtils.error("OpenReplay: Conditions JSON parsing error: $e")
-                completion(emptyList())
+                DebugUtils.error("Conditions JSON parsing error: $e")
+                withContext(Dispatchers.Main) { completion(emptyList()) }
+            } finally {
+                request.disconnect()
             }
-        }, onError = {
-            DebugUtils.log("Can't get conditions: ${it?.message}")
-            completion(emptyList())
-        })
+        }
     }
 
-    fun sendImages(
-        projectKey: String,
-        images: ByteArray,
-        name: String,
-        completion: (Boolean) -> Unit
-    ) {
-        val token = this.token ?: run {
-            DebugUtils.log("No token available for sendImages.")
-            completion(false)
-            return
+    private fun compressData(data: ByteArray): ByteArray {
+        val byteArrayOutputStream = ByteArrayOutputStream()
+        GZIPOutputStream(byteArrayOutputStream).use { gzipOutputStream ->
+            gzipOutputStream.write(data)
         }
+        return byteArrayOutputStream.toByteArray()
+    }
 
-        val boundary = "Boundary-${UUID.randomUUID()}"
-        val requestBody = buildMultipartBody(
-            boundary,
-            mapOf("projectKey" to projectKey),
-            "batch" to Pair(name, images)
-        )
+    private fun appendLocalFile(data: ByteArray) {
+        networkScope.launch {
+            if (OpenReplay.options.debugLogs) {
+                val filePath = File(getAppContext().filesDir, "session.dat")
+                try {
+                    filePath.apply {
+                        parentFile?.mkdirs()
+                        createNewFile()
+                    }.outputStream().apply {
+                        FileOutputStream(filePath, true).use { it.write(data) }
+                    }
+                    DebugUtils.log("Data appended to file at: ${filePath.absolutePath}")
+                } catch (e: IOException) {
+                    DebugUtils.log("File append error: ${e.message}")
+                }
+            }
+        }
+    }
 
-        val request = createRequest(
-            method = "POST",
-            path = IMAGES_URL,
-            body = requestBody,
-            headers = mapOf(
-                "Authorization" to "Bearer $token",
-                "Content-Type" to "multipart/form-data; boundary=$boundary"
+    fun sendLateMessage(content: ByteArray, completion: (Boolean) -> Unit) {
+        networkScope.launch {
+            val token = UserDefaults.lastToken ?: run {
+                DebugUtils.log("No last token found for sendLateMessage.")
+                withContext(Dispatchers.Main) { completion(false) }
+                return@launch
+            }
+
+            val request = createRequest(
+                method = "POST",
+                path = LATE_URL,
+                body = content,
+                headers = mapOf("Authorization" to "Bearer $token")
             )
-        )
 
-        asyncCallAPI(request, onSuccess = {
-            DebugUtils.log("Images sent successfully")
-            completion(true)
-        }, onError = {
-            println("Failed to send images: ${it?.message}")
-            completion(false)
-        })
+            try {
+                request.connect()
+                if (request.responseCode in 200..299) {
+                    DebugUtils.log("Late message sent successfully")
+                    withContext(Dispatchers.Main) { completion(true) }
+                } else {
+                    DebugUtils.log("Failed to send late message: ${request.responseCode}")
+                    withContext(Dispatchers.Main) { completion(false) }
+                }
+            } catch (e: Exception) {
+                DebugUtils.log("Error sending late message: ${e.message}")
+                withContext(Dispatchers.Main) { completion(false) }
+            } finally {
+                request.disconnect()
+            }
+        }
     }
 
     private fun buildMultipartBody(
@@ -264,12 +277,14 @@ object NetworkManager {
         val outputStream = ByteArrayOutputStream()
         val writer = outputStream.bufferedWriter()
 
+        // Write form fields
         formFields.forEach { (name, value) ->
             writer.write("--$boundary\r\n")
             writer.write("Content-Disposition: form-data; name=\"$name\"\r\n\r\n")
             writer.write("$value\r\n")
         }
 
+        // Write file field
         val (fileName, fileData) = fileField.second
         writer.write("--$boundary\r\n")
         writer.write("Content-Disposition: form-data; name=\"${fileField.first}\"; filename=\"$fileName\"\r\n")
@@ -283,32 +298,50 @@ object NetworkManager {
         return outputStream.toByteArray()
     }
 
+    fun sendImages(
+        projectKey: String,
+        images: ByteArray,
+        name: String,
+        completion: (Boolean) -> Unit
+    ) {
+        networkScope.launch {
+            val token = this@NetworkManager.token ?: run {
+                DebugUtils.log("No token available for sendImages.")
+                withContext(Dispatchers.Main) { completion(false) }
+                return@launch
+            }
 
-    private fun compressData(data: ByteArray): ByteArray {
-        val byteArrayOutputStream = ByteArrayOutputStream()
-        GZIPOutputStream(byteArrayOutputStream).use { gzipOutputStream ->
-            gzipOutputStream.write(data)
-        }
-        return byteArrayOutputStream.toByteArray()
-    }
+            val boundary = "Boundary-${UUID.randomUUID()}"
+            val requestBody = buildMultipartBody(
+                boundary,
+                formFields = mapOf("projectKey" to projectKey),
+                fileField = "batch" to Pair(name, images)
+            )
 
-    private fun appendLocalFile(data: ByteArray) {
-        if (OpenReplay.options.debugLogs) {
-            val filePath = File(getAppContext().filesDir, "session.dat")
+            val request = createRequest(
+                method = "POST",
+                path = IMAGES_URL,
+                body = requestBody,
+                headers = mapOf(
+                    "Authorization" to "Bearer $token",
+                    "Content-Type" to "multipart/form-data; boundary=$boundary"
+                )
+            )
+
             try {
-                filePath.apply {
-                    // Create file and directories if they don't exist
-                    parentFile?.mkdirs()
-                    createNewFile()
-                }.outputStream().apply {
-                    // Append mode set to true
-                    FileOutputStream(filePath, true).use { stream ->
-                        stream.write(data)
-                    }
+                request.connect()
+                if (request.responseCode in 200..299) {
+                    DebugUtils.log("Images sent successfully")
+                    withContext(Dispatchers.Main) { completion(true) }
+                } else {
+                    DebugUtils.log("Failed to send images: ${request.responseCode}")
+                    withContext(Dispatchers.Main) { completion(false) }
                 }
-                println("Data appended to file at: ${filePath.absolutePath}")
-            } catch (e: IOException) {
-                e.printStackTrace()
+            } catch (e: Exception) {
+                DebugUtils.log("Error sending images: ${e.message}")
+                withContext(Dispatchers.Main) { completion(false) }
+            } finally {
+                request.disconnect()
             }
         }
     }

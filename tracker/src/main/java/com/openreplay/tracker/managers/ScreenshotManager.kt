@@ -57,7 +57,6 @@ object ScreenshotManager {
         DebugUtils.error(throwable)
     })
 
-    private var isStoping = false
     fun setSettings(settings: Triple<Int, Int, Int>) {
         val (_, quality, resolution) = settings
         this.quality = quality
@@ -67,7 +66,6 @@ object ScreenshotManager {
     fun start(context: Context, startTs: Long) {
         uiContext = WeakReference(context)
         firstTs = startTs.toString()
-        isStoping = false
         val intervalMillis =
             OpenReplay.options.screenshotFrequency.millis / OpenReplay.options.fps.toLong()
 
@@ -101,28 +99,26 @@ object ScreenshotManager {
         sanitizedElements.remove(view)
     }
 
-    private suspend fun sendScreenshotArchives() {
-        // while we are doing  our job we  send data
-        coroutineScope {
-            try {
-                val archives = getArchiveFolder().listFiles().orEmpty()
-                if (archives.isEmpty()) return@coroutineScope
-                DebugUtils.log("sending archives size: ${archives.size}")
-                archives.forEach { archive ->
-                    NetworkManager.sendImages(
-                        projectKey = OpenReplay.projectKey!!,
-                        images = archive.readBytes(),
-                        name = archive.name
-                    ) { success ->
+    private suspend fun sendScreenshotArchives() = withContext(Dispatchers.IO) {
+        try {
+            val archives = getArchiveFolder().listFiles().orEmpty()
+            if (archives.isEmpty()) return@withContext
+
+            archives.forEach { archive ->
+                NetworkManager.sendImages(
+                    projectKey = OpenReplay.projectKey!!,
+                    images = archive.readBytes(),
+                    name = archive.name
+                ) { success ->
+                    scope.launch {
                         if (success) {
-                            archive.delete()
+                            archive.deleteSafely()
                         }
                     }
                 }
-
-            } catch (e: Exception) {
-                DebugUtils.error(e)
             }
+        } catch (e: Exception) {
+            DebugUtils.error("Error sending screenshot archives: ${e.message}")
         }
     }
 
@@ -151,34 +147,20 @@ object ScreenshotManager {
     }
 
     private fun terminate() {
-        // lives more than scope, uses only for termination
-        // todo use work manager to be sure
-        Executors.newSingleThreadExecutor()
-            .asCoroutineDispatcher()
-            .use { dispatcher ->
-                scope.launch(dispatcher) {
-                    try {
-                        DebugUtils.log("terminate")
-                        // get or create folder
-                        val screenShotFolder = getScreenshotFolder()
-                        // archive whole folder
-                        archivateFolder(folder = screenShotFolder)
-                        // send screen shots
-                        sendScreenshotArchives()
-                        DebugUtils.log("terminate done")
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
+        scope.launch {
+            try {
+                val screenshotFolder = getScreenshotFolder()
+                archivateFolder(screenshotFolder)
+                sendScreenshotArchives()
+            } catch (e: Exception) {
+                DebugUtils.error("Error during termination: ${e.message}")
             }
+        }
     }
 
 
     private fun archivateFolder(folder: File) {
-        // now we have to add it to archive
-        // prepare data
-        val screenshots = folder.listFiles().orEmpty()
-        screenshots.sortBy { it.lastModified() }
+        val screenshots = folder.listFiles().orEmpty().sortedBy { it.lastModified() }
 
         // combine chunked data to zip
         val combinedData = ByteArrayOutputStream()
@@ -196,33 +178,42 @@ object ScreenshotManager {
                 }
             }
         }
-        // get archive
         val archiveFolder = getArchiveFolder()
-        // create file
-        val achiveFile = File(archiveFolder, "$sessionId-$lastTs.tar.gz")
-        FileOutputStream(achiveFile).use { out -> out.write(combinedData.toByteArray()) }
+        val archiveFile = File(archiveFolder, "$sessionId-$lastTs.tar.gz")
+        FileOutputStream(archiveFile).use { out -> out.write(combinedData.toByteArray()) }
 
-        // when done achive delete all screenshots
-        screenshots.forEach { it.delete() }
+        scope.launch {
+            screenshots.forEach { it.deleteSafely() }
+        }
     }
+
+//    private fun getArchiveFolder(): File {
+//        val context = uiContext.get() ?: throw IllegalStateException("No context")
+//        val archiveFolder = File(context.filesDir, "archives")
+//        if (!archiveFolder.exists()) {
+//            archiveFolder.mkdir()
+//        }
+//        return archiveFolder
+//    }
 
     private fun getArchiveFolder(): File {
         val context = uiContext.get() ?: throw IllegalStateException("No context")
-        val archiveFolder = File(context.filesDir, "archives")
-        if (!archiveFolder.exists()) {
-            archiveFolder.mkdir()
-        }
-        return archiveFolder
+        return File(context.filesDir, "archives").apply { mkdirs() }
     }
 
     private fun getScreenshotFolder(): File {
         val context = uiContext.get() ?: throw IllegalStateException("No context")
-        val screenShotFolder = File(context.filesDir, "screenshots")
-        if (!screenShotFolder.exists()) {
-            screenShotFolder.mkdir()
-        }
-        return screenShotFolder
+        return File(context.filesDir, "screenshots").apply { mkdirs() }
     }
+
+//    private fun getScreenshotFolder(): File {
+//        val context = uiContext.get() ?: throw IllegalStateException("No context")
+//        val screenShotFolder = File(context.filesDir, "screenshots")
+//        if (!screenShotFolder.exists()) {
+//            screenShotFolder.mkdir()
+//        }
+//        return screenShotFolder
+//    }
 
     private suspend fun captureScreenshot(): Bitmap {
         val activity =
@@ -427,6 +418,16 @@ object ScreenshotManager {
         } else {
             // Old version can keep using view.draw
             result(oldViewToBitmap(view))
+        }
+    }
+
+    private fun File.deleteSafely() {
+        if (exists()) {
+            try {
+                delete()
+            } catch (e: Exception) {
+                DebugUtils.error("Error deleting file: ${e.message}")
+            }
         }
     }
 }

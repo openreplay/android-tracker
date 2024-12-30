@@ -1,11 +1,16 @@
 package com.openreplay.tracker.managers
 
 import NetworkManager
+import android.content.Context
 import android.os.Handler
 import com.openreplay.tracker.OpenReplay
+import com.openreplay.tracker.OpenReplay.getLateMessagesFile
 import com.openreplay.tracker.models.ORMessage
 import com.openreplay.tracker.models.script.ORMobileBatchMeta
 import com.openreplay.tracker.models.script.ORMobileNetworkCall
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
@@ -44,21 +49,35 @@ object MessageCollector {
     }
 
 
-    fun start() {
-        this.lateMessagesFile = OpenReplay.getLateMessagesFile()
-        sendIntervalFuture = executorService.scheduleWithFixedDelay({
-            executorService.execute {
-                flushMessages()
-            }
-        }, 0, 5, TimeUnit.SECONDS)
+    fun start(context: Context) {
+        CoroutineScope(Dispatchers.IO).launch {
+            // Get the lateMessagesFile in a background thread
+            val lateMessagesFile = getLateMessagesFile(context)
 
-        if (lateMessagesFile?.exists() == true) {
-            val lateData = lateMessagesFile!!.readBytes()
-            NetworkManager.sendLateMessage(lateData) { success ->
-                if (success) {
-                    lateMessagesFile!!.delete()
+            // Check if the file exists
+            if (lateMessagesFile.exists()) {
+                try {
+                    // Read the late messages data
+                    val lateData = lateMessagesFile.readBytes()
+
+                    // Send late messages
+                    NetworkManager.sendLateMessage(lateData) { success ->
+                        if (success) {
+                            // Delete the file on successful sending
+                            lateMessagesFile.delete()
+                        }
+                    }
+                } catch (e: Exception) {
+                    DebugUtils.log("Error processing late messages: ${e.message}")
                 }
             }
+
+            // Schedule flush messages at regular intervals
+            sendIntervalFuture = executorService.scheduleWithFixedDelay({
+                executorService.execute {
+                    flushMessages()
+                }
+            }, 0, 5, TimeUnit.SECONDS)
         }
     }
 
