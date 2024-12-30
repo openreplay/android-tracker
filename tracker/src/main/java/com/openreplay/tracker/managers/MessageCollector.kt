@@ -7,6 +7,7 @@ import com.openreplay.tracker.OpenReplay
 import com.openreplay.tracker.OpenReplay.getLateMessagesFile
 import com.openreplay.tracker.models.ORMessage
 import com.openreplay.tracker.models.script.ORMobileBatchMeta
+import com.openreplay.tracker.models.script.ORMobileGraphQL
 import com.openreplay.tracker.models.script.ORMobileNetworkCall
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -150,6 +151,7 @@ object MessageCollector {
                 DebugUtils.log("-->> MobileNetworkCall(105): ${networkCallMessage.method} ${networkCallMessage.URL}")
             }
         }
+
         sendRawMessage(data = message.contentData())
     }
 

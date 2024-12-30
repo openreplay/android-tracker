@@ -33,6 +33,7 @@ import com.openreplay.tracker.listeners.sendNetworkMessage
 import com.openreplay.tracker.managers.ConditionsManager
 import com.openreplay.tracker.managers.DebugUtils
 import com.openreplay.tracker.managers.MessageCollector
+import com.openreplay.tracker.managers.MessageHandler
 import com.openreplay.tracker.managers.ScreenshotManager
 import com.openreplay.tracker.managers.UserDefaults
 import com.openreplay.tracker.models.OROptions
@@ -288,6 +289,10 @@ object OpenReplay {
         duration: ULong
     ) {
         sendNetworkMessage(url, method, requestJSON, responseJSON, status, duration)
+    }
+
+    fun sendMessage(type: String, msg: Any) {
+        MessageHandler.sendMessage(type, msg)
     }
 
     fun eventStr(name: String, jsonPayload: String) {

@@ -165,8 +165,6 @@ object NetworkManager {
                     DebugUtils.log("Failed to send message: ${request.responseCode}")
                     withContext(Dispatchers.Main) { completion(false) }
                 }
-//                DebugUtils.log("Message sent successfully")
-//                withContext(Dispatchers.Main) { completion(true) }
             } catch (e: Exception) {
                 DebugUtils.log("Message sending failed: ${e.message}")
                 withContext(Dispatchers.Main) { completion(false) }

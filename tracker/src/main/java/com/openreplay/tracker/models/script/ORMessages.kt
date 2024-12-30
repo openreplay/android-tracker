@@ -20,7 +20,8 @@ enum class ORMessageType(val id: UByte) {
     MobileInternalError(104u),
     MobileNetworkCall(105u),
     MobileSwipeEvent(106u),
-    MobileBatchMeta(107u);
+    MobileBatchMeta(107u),
+    GraphQL(89u);
 
     companion object {
         fun fromId(id: UByte): ORMessageType? = entries.find { it.id == id }
@@ -203,7 +204,17 @@ class ORMobileNetworkCall(
 ) : ORMessage(ORMessageType.MobileNetworkCall) {
 
     override fun contentData(): ByteArray {
-        return this.prefixData() + withSize(fromValues(type, method, URL, response, request, status, duration))
+        return this.prefixData() + withSize(
+            fromValues(
+                type,
+                method,
+                URL,
+                response,
+                request,
+                status,
+                duration
+            )
+        )
     }
 
     override fun toString(): String {
@@ -327,5 +338,29 @@ class ORMobileEvent(
 
     override fun toString(): String {
         return "-->> MobileEvent(93): timestamp: $timestamp name: $name payload: $payload"
+    }
+}
+
+class ORMobileGraphQL(
+    val operationKind: String,
+    val operationName: String,
+    val variables: String,
+    val response: String,
+    val duration: ULong,
+) : ORMessage(ORMessageType.GraphQL) {
+    override fun contentData(): ByteArray {
+        return this.prefixData() + withSize(
+            fromValues(
+                operationKind,
+                operationName,
+                variables,
+                response,
+                duration,
+            )
+        )
+    }
+
+    override fun toString(): String {
+        return "-->> GraphQL(89): timestamp: $timestamp operationKind: $operationKind operationName: $operationName variables: $variables response: $response duration: $duration"
     }
 }
