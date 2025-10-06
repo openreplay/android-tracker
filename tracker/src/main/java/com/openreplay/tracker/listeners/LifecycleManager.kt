@@ -9,7 +9,8 @@ import com.openreplay.tracker.managers.DebugUtils
 import java.lang.ref.WeakReference
 
 class LifecycleManager(
-    context: Context
+    context: Context,
+    initialActivity: Activity? = null
 ) : Application.ActivityLifecycleCallbacks {
 
     private var application: Application? = null
@@ -26,6 +27,15 @@ class LifecycleManager(
         } else {
             context.applicationContext as? Application
         }
+        
+        // Capture initial activity if provided
+        initialActivity?.let {
+            currentActivityRef = WeakReference(it)
+            DebugUtils.log("LifecycleManager initialized with activity: ${it.localClassName}")
+        } ?: run {
+            DebugUtils.log("LifecycleManager initialized without initial activity")
+        }
+        
         application?.registerActivityLifecycleCallbacks(this)
     }
 

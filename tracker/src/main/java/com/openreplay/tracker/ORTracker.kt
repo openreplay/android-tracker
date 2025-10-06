@@ -86,6 +86,11 @@ object OpenReplay {
         this.options = this.options.merge(options)
         this.projectKey = projectKey
 
+        // Initialize LifecycleManager immediately to capture current activity
+        if (this.lifecycleManager == null) {
+            this.lifecycleManager = LifecycleManager(appContext, context as? Activity)
+        }
+
         this.connectivityManager =
             appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
@@ -132,9 +137,6 @@ object OpenReplay {
         SessionRequest.create(appContext!!, false) { sessionResponse ->
             sessionResponse ?: return@create println("Openreplay: no response from /start request")
 
-            if (this.lifecycleManager == null) {
-                this.lifecycleManager = LifecycleManager(appContext!!)
-            }
             MessageCollector.start(appContext!!)
 
             with(options) {
@@ -174,6 +176,11 @@ object OpenReplay {
         this.options = options
         this.projectKey = projectKey
         this.bufferingMode = true
+
+        // Initialize LifecycleManager immediately to capture current activity
+        if (this.lifecycleManager == null) {
+            this.lifecycleManager = LifecycleManager(appContext, context as? Activity)
+        }
 
         CoroutineScope(Dispatchers.IO).launch {
             UserDefaults.init(appContext)
