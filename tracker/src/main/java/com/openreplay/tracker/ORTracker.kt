@@ -375,35 +375,36 @@ object OpenReplay {
      * Setup gesture detector for a specific activity.
      * This method should be called from LifecycleManager when an activity is resumed.
      * Using WeakReference pattern through LifecycleManager prevents memory leaks.
+     * 
+     * The gesture detector is triggered via the activity's dispatchTouchEvent() method,
+     * ensuring ALL touch events are captured without interference with normal touch handling.
      */
     fun setupGestureDetectorForActivity(activity: Activity) {
         val rootView = activity.window.decorView.rootView
-
         val gestureListener = ORGestureListener(rootView)
         this.gestureDetector = GestureDetector(activity, gestureListener)
-
-        // Set up gesture detection for legacy Android views
-        rootView.setOnTouchListener { v, event ->
-            gestureDetector?.onTouchEvent(event)
-            false
-        }
-
-        // Handle Jetpack Compose views
-        if (rootView is ViewGroup) {
-            for (i in 0 until rootView.childCount) {
-                val child = rootView.getChildAt(i)
-                if (child is AbstractComposeView) {
-                    child.setOnTouchListener { v, event ->
-                        gestureDetector?.onTouchEvent(event)
-                        false
-                    }
-                }
-            }
+        
+        if (options.debugLogs) {
+            DebugUtils.log("Gesture detector setup for activity: ${activity.localClassName}")
         }
     }
 
-    fun onTouchEvent(event: MotionEvent) {
-        this.gestureDetector?.onTouchEvent(event)
+    /**
+     * Process touch events through the gesture detector.
+     * This should be called from the activity's dispatchTouchEvent() method.
+     * 
+     * @param event The MotionEvent to process
+     * @return true if the gesture detector processed the event, false otherwise
+     */
+    fun onTouchEvent(event: MotionEvent): Boolean {
+        val handled = this.gestureDetector?.onTouchEvent(event) ?: false
+        
+        // Optional debug logging for touch events
+        if (options.debugLogs && event.action == MotionEvent.ACTION_DOWN) {
+            DebugUtils.log("Touch event captured at (${event.x}, ${event.y})")
+        }
+        
+        return handled
     }
 
     fun getSessionID(): String {
@@ -416,6 +417,18 @@ object OpenReplay {
      */
     fun getCurrentActivity(): Activity? {
         return lifecycleManager?.currentActivity
+    }
+
+    /**
+     * Check if gesture tracking is properly initialized.
+     * Useful for debugging gesture tracking issues.
+     */
+    fun isGestureTrackingEnabled(): Boolean {
+        val isEnabled = gestureDetector != null && options.analytics
+        if (options.debugLogs) {
+            DebugUtils.log("Gesture tracking enabled: $isEnabled (detector: ${gestureDetector != null}, analytics: ${options.analytics})")
+        }
+        return isEnabled
     }
 }
 
