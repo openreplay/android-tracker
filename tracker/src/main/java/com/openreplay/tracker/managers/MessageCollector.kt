@@ -26,10 +26,15 @@ object MessageCollector {
     private var lateMessagesFile: File? = null
     private var tick = 0
     private var sendIntervalFuture: ScheduledFuture<*>? = null
-    private val executorService = Executors.newScheduledThreadPool(2)
+    private var executorService = Executors.newScheduledThreadPool(2)
     private var debouncedMessage: ORMessage? = null
     private var debounceJob: ScheduledFuture<*>? = null
     private var bufferJob: ScheduledFuture<*>? = null
+    
+    @Volatile
+    private var isPaused = false
+    @Volatile
+    private var isStarted = false
 
     private fun startCycleBuffer() {
         bufferJob?.cancel(false)
@@ -40,6 +45,19 @@ object MessageCollector {
 
 
     fun start(context: Context) {
+        if (isStarted && !isPaused) {
+            DebugUtils.log("MessageCollector already started")
+            return
+        }
+        
+        if (isPaused) {
+            resume()
+            return
+        }
+        
+        isStarted = true
+        isPaused = false
+        
         CoroutineScope(Dispatchers.IO).launch {
             // Get the lateMessagesFile in a background thread
             val lateMessagesFile = getLateMessagesFile(context)
@@ -71,13 +89,84 @@ object MessageCollector {
         }
     }
 
+    fun pause() {
+        if (!isStarted || isPaused) {
+            DebugUtils.log("MessageCollector not started or already paused")
+            return
+        }
+        
+        isPaused = true
+        
+        // Pause scheduled tasks but don't shutdown executor
+        sendIntervalFuture?.cancel(false)
+        bufferJob?.cancel(false)
+        debounceJob?.cancel(false)
+        
+        // Flush remaining messages before pausing
+        executorService.execute {
+            flushMessages()
+        }
+        
+        if (OpenReplay.options.debugLogs) {
+            DebugUtils.log("MessageCollector paused")
+        }
+    }
+    
+    fun resume() {
+        if (!isStarted || !isPaused) {
+            DebugUtils.log("MessageCollector not paused or not started")
+            return
+        }
+        
+        isPaused = false
+        
+        // Restart scheduled tasks
+        sendIntervalFuture = executorService.scheduleWithFixedDelay({
+            executorService.execute {
+                flushMessages()
+            }
+        }, 0, 5, TimeUnit.SECONDS)
+        
+        if (OpenReplay.bufferingMode) {
+            startCycleBuffer()
+        }
+        
+        if (OpenReplay.options.debugLogs) {
+            DebugUtils.log("MessageCollector resumed")
+        }
+    }
+
     fun stop() {
+        if (!isStarted) {
+            return
+        }
+        
         sendIntervalFuture?.cancel(true)
         bufferJob?.cancel(true)
         debounceJob?.cancel(true)
-        executorService.shutdown()
-
+        
         terminate()
+        
+        // Shutdown and recreate executor for future use
+        executorService.shutdown()
+        try {
+            if (!executorService.awaitTermination(5, TimeUnit.SECONDS)) {
+                executorService.shutdownNow()
+            }
+        } catch (e: InterruptedException) {
+            executorService.shutdownNow()
+            Thread.currentThread().interrupt()
+        }
+        
+        // Recreate executor service for potential restart
+        executorService = Executors.newScheduledThreadPool(2)
+        
+        isStarted = false
+        isPaused = false
+        
+        if (OpenReplay.options.debugLogs) {
+            DebugUtils.log("MessageCollector stopped")
+        }
     }
 
     private fun flushMessages() {
@@ -135,6 +224,13 @@ object MessageCollector {
     }
 
     fun sendMessage(message: ORMessage) {
+        if (isPaused) {
+            if (OpenReplay.options.debugLogs) {
+                DebugUtils.log("MessageCollector is paused, message dropped")
+            }
+            return
+        }
+        
         if (OpenReplay.bufferingMode) {
             ConditionsManager.processMessage(message)?.let { trigger ->
                 OpenReplay.triggerRecording(trigger)

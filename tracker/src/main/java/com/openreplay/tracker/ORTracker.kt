@@ -93,7 +93,7 @@ object OpenReplay {
             UserDefaults.init(appContext)
         }
         this.appContext = appContext
-        this.options = this.options.merge(options)
+        this.options = options
         this.projectKey = projectKey
 
         // Initialize LifecycleManager immediately to capture current activity
@@ -319,6 +319,84 @@ object OpenReplay {
         }
     }
 
+    /**
+     * Pause the tracker when app goes to background.
+     * This pauses analytics collection but maintains the session.
+     */
+    fun pause() {
+        synchronized(sessionLock) {
+            if (!isSessionStarted) {
+                if (options.debugLogs) {
+                    DebugUtils.log("Cannot pause - session not started")
+                }
+                return
+            }
+            
+            if (options.debugLogs) {
+                DebugUtils.log("Pausing OpenReplay tracker")
+            }
+            
+            // Pause components without destroying them
+            ScreenshotManager.stop()
+            Analytics.stop()
+            LogsListener.stop()
+            appContext?.let {
+                PerformanceListener.getInstance(it).stop()
+            }
+            MessageCollector.pause()
+            
+            // Note: We keep lifecycle manager, network callbacks, and session active
+        }
+    }
+    
+    /**
+     * Resume the tracker when app returns to foreground.
+     * This resumes analytics collection.
+     */
+    fun resume() {
+        synchronized(sessionLock) {
+            if (!isSessionStarted) {
+                // If session was never started, start it now
+                if (options.debugLogs) {
+                    DebugUtils.log("Session not started, starting new session")
+                }
+                startSession(onStarted = {})
+                return
+            }
+            
+            if (options.debugLogs) {
+                DebugUtils.log("Resuming OpenReplay tracker")
+            }
+            
+            val context = appContext
+            if (context == null) {
+                DebugUtils.error("App context is null, cannot resume")
+                return
+            }
+            
+            // Resume message collector
+            MessageCollector.resume()
+            
+            // Restart components
+            with(options) {
+                if (screen) {
+                    ScreenshotManager.setSettings(
+                        settings = getCaptureSettings(
+                            fps = 1,
+                            quality = screenshotQuality
+                        )
+                    )
+                    ScreenshotManager.start(context, sessionStartTs)
+                }
+                if (logs) LogsListener.start()
+                if (performances) {
+                    PerformanceListener.getInstance(context).start()
+                }
+                if (analytics) Analytics.start()
+            }
+        }
+    }
+
     fun stop(closeSession: Boolean = true) {
         synchronized(sessionLock) {
             ScreenshotManager.stop()
@@ -329,6 +407,7 @@ object OpenReplay {
             }
             Crash.stop()
             MessageCollector.stop()
+            ConditionsManager.cleanup()
             
             // Clean up gesture listener
             gestureListener?.cleanup()
@@ -541,11 +620,9 @@ fun Sanitized(
     AndroidView(
         factory = {
             SanitizableViewGroup(context).apply {
-                // Add a FrameLayout to hold the composable content
                 val frameLayout = FrameLayout(context)
                 addView(frameLayout)
 
-                // Set LayoutParams for the frame layout
                 frameLayout.layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT

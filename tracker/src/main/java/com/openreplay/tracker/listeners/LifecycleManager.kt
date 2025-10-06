@@ -70,19 +70,13 @@ class LifecycleManager(
         currentActivityRef = WeakReference(activity)
         startedActivityCount++
         
-        // Only start session when transitioning from background to foreground
+        // Only resume session when transitioning from background to foreground
         if (startedActivityCount == 1) {
             if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("App entering foreground")
+                DebugUtils.log("App entering foreground - resuming tracker")
             }
-            Analytics.sendBackgroundEvent(0u) // Send foreground event
-            OpenReplay.startSession(
-                onStarted = {
-                    if (OpenReplay.options.debugLogs) {
-                        DebugUtils.log("OpenReplay session resumed")
-                    }
-                }
-            )
+            OpenReplay.resume()
+            Analytics.sendBackgroundEvent(0u)
         } else {
             if (OpenReplay.options.debugLogs) {
                 DebugUtils.log("Activity started (count: $startedActivityCount): ${activity.localClassName}")
@@ -92,12 +86,10 @@ class LifecycleManager(
 
     override fun onActivityResumed(activity: Activity) {
         currentActivityRef = WeakReference(activity)
-        // Setup gesture detector for the current activity
         OpenReplay.setupGestureDetectorForActivity(activity)
     }
 
     override fun onActivityPaused(activity: Activity) {
-        // Check if this is due to configuration change
         isChangingConfiguration = activity.isChangingConfigurations
         if (OpenReplay.options.debugLogs && isChangingConfiguration) {
             DebugUtils.log("Activity paused due to configuration change: ${activity.localClassName}")
@@ -107,13 +99,13 @@ class LifecycleManager(
     override fun onActivityStopped(activity: Activity) {
         startedActivityCount--
         
-        // Only stop session when all activities are stopped AND not a configuration change
+        // Only pause session when all activities are stopped AND not a configuration change
         if (startedActivityCount <= 0 && !isChangingConfiguration) {
             if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("App entering background")
+                DebugUtils.log("App entering background - pausing tracker")
             }
-            Analytics.sendBackgroundEvent(1u) // Send background event
-            OpenReplay.stop(false)
+            Analytics.sendBackgroundEvent(1u)
+            OpenReplay.pause()
             startedActivityCount = 0 // Ensure it doesn't go negative
         } else {
             if (OpenReplay.options.debugLogs) {
@@ -121,7 +113,6 @@ class LifecycleManager(
             }
         }
         
-        // Reset configuration change flag
         isChangingConfiguration = false
     }
 
