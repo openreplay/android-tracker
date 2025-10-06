@@ -36,14 +36,14 @@ class MessageHandler {
                             else -> gson.toJson(msg) // Serialize other types to JSON
                         }
                     } catch (e: Exception) {
-                        println("OpenReplay: Error serializing or validating message: ${e.message}")
+                        DebugUtils.error("Error serializing or validating GraphQL message", e)
                         return@launch
                     }
 
                     val dict = try {
                         messageString.toMap()
                     } catch (e: Exception) {
-                        println("OpenReplay: Error parsing message: ${e.message}")
+                        DebugUtils.error("Error parsing GraphQL message", e)
                         return@launch
                     }
 
@@ -80,7 +80,7 @@ class MessageHandler {
 //                    println(hexStr)
                     MessageCollector.sendMessage(gqlMessage)
                 } else {
-                    println("OpenReplay: Unknown msg type passed.")
+                    DebugUtils.warn("Unknown message type passed: $type")
                 }
             }
         }

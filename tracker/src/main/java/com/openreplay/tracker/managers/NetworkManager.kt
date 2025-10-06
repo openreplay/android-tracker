@@ -175,6 +175,9 @@ object NetworkManager {
                     sessionId = sessionResponse.sessionID
                     projectId = sessionResponse.projectID
 
+                    // Save token for late messages
+                    token?.let { UserDefaults.lastToken = it }
+
                     if (OpenReplay.options.debugLogs) {
                         DebugUtils.log("Session created successfully: $sessionId")
                     }
@@ -343,13 +346,28 @@ object NetworkManager {
                 return@launch
             }
 
+            val compressedContent = try {
+                compressData(content).also {
+                    if (OpenReplay.options.debugLogs) {
+                        DebugUtils.log("Compressed late message ${content.size} bytes to ${it.size} bytes")
+                    }
+                }
+            } catch (e: Exception) {
+                DebugUtils.error("Error compressing late message: ${e.message}")
+                content
+            }
+
             var request: HttpURLConnection? = null
             try {
                 request = createRequest(
                     method = "POST",
                     path = LATE_URL,
-                    body = content,
-                    headers = mapOf("Authorization" to "Bearer $token")
+                    body = compressedContent,
+                    headers = mapOf(
+                        "Authorization" to "Bearer $token",
+                        "Content-Encoding" to "gzip",
+                        "Content-Type" to "application/octet-stream"
+                    )
                 )
 
                 val responseCode = request.responseCode

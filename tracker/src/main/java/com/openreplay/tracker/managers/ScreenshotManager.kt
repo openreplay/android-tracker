@@ -1,7 +1,5 @@
 package com.openreplay.tracker.managers
 
-import com.openreplay.tracker.managers.NetworkManager
-import com.openreplay.tracker.managers.NetworkManager.sessionId
 import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
@@ -25,7 +23,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -92,6 +89,9 @@ object ScreenshotManager {
 
     @Synchronized
     fun addSanitizedElement(view: View) {
+        // Clean up null references first
+        sanitizedElements.removeAll { it.get() == null }
+        
         if (OpenReplay.options.debugLogs) {
             DebugUtils.log("Sanitizing view: $view")
         }
@@ -103,7 +103,7 @@ object ScreenshotManager {
         if (OpenReplay.options.debugLogs) {
             DebugUtils.log("Removing sanitized view: $view")
         }
-        // Remove by matching the actual view
+        // Remove by matching the actual view and clean up null references
         sanitizedElements.removeAll { it.get() == view || it.get() == null }
     }
 
@@ -201,6 +201,7 @@ object ScreenshotManager {
             }
         }
         val archiveFolder = getArchiveFolder()
+        val sessionId = NetworkManager.sessionId ?: "unknown"
         val archiveFile = File(archiveFolder, "$sessionId-$lastTs.tar.gz")
         FileOutputStream(archiveFile).use { out -> out.write(combinedData.toByteArray()) }
 
@@ -249,6 +250,9 @@ object ScreenshotManager {
 
         // Draw masks over sanitized elements
         synchronized(sanitizedElements) {
+            // Clean up null references
+            sanitizedElements.removeAll { it.get() == null }
+            
             sanitizedElements.forEach { weakRef ->
                 val sanitizedView = weakRef.get()
                 if (sanitizedView != null && sanitizedView.visibility == View.VISIBLE && sanitizedView.isAttachedToWindow) {
