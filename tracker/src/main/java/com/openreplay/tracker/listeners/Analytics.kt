@@ -35,6 +35,8 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.debugInspectorInfo
 import androidx.compose.ui.platform.testTag
+import com.openreplay.tracker.OpenReplay
+import com.openreplay.tracker.managers.DebugUtils
 
 enum class SwipeDirection {
     LEFT, RIGHT, UP, DOWN, UNDEFINED;
@@ -211,12 +213,7 @@ open class TrackingActivity : AppCompatActivity() {
     }
 
     private fun getViewDescription(view: View?): String {
-        return when (view) {
-            is EditText -> view.text.toString()
-            is TextView -> view.text.toString()
-            is Button -> view.text.toString()
-            else -> view?.javaClass?.simpleName ?: "Unknown View"
-        }
+        return extractElementLabel(view)
     }
 
     fun sanitizeView(view: View) {
@@ -341,6 +338,52 @@ class ActivityLifecycleTracker : LifecycleEventObserver {
     }
 }
 
+/**
+ * Extract comprehensive element properties from a view for tracking.
+ * Includes: resource ID, text content, content description, and view type.
+ */
+fun extractElementLabel(view: View?): String {
+    if (view == null) return "Unknown View"
+    
+    val parts = mutableListOf<String>()
+    
+    // Add resource ID if available
+    try {
+        if (view.id != View.NO_ID) {
+            val resourceName = view.resources.getResourceEntryName(view.id)
+            parts.add("id:$resourceName")
+        }
+    } catch (e: Exception) {
+        // Resource not found, skip
+    }
+    
+    // Add text content if available
+    val text = when (view) {
+        is EditText -> view.text.toString().take(50)
+        is TextView -> view.text.toString().take(50)
+        is Button -> view.text.toString().take(50)
+        else -> null
+    }
+    
+    if (!text.isNullOrBlank()) {
+        parts.add("text:$text")
+    }
+    
+    // Add content description if available
+    if (!view.contentDescription.isNullOrBlank()) {
+        parts.add("desc:${view.contentDescription.toString().take(50)}")
+    }
+    
+    // Add view class name
+    parts.add("type:${view.javaClass.simpleName}")
+    
+    return if (parts.isNotEmpty()) {
+        parts.joinToString(" | ")
+    } else {
+        view.javaClass.simpleName
+    }
+}
+
 fun trackAllTextViews(view: View) {
 //    if (view is TextView) {
 //        Analytics.addObservedView(view, "MainActivity", "TextView")
@@ -401,14 +444,24 @@ class ORGestureListener(private val rootView: View) : GestureDetector.SimpleOnGe
     private val endOfScrollRunnable = Runnable {
         if (isScrolling) {
             isScrolling = false
+            
+            if (OpenReplay.options.debugLogs) {
+                DebugUtils.log("Swipe detected: $swipeDirection at ($lastX, $lastY)")
+            }
 
             Analytics.sendSwipe(swipeDirection, lastX, lastY)
         }
     }
 
     override fun onSingleTapUp(e: MotionEvent): Boolean {
-        val clickedView = findViewAtPosition(rootView, e.x, e.y)
-        Analytics.sendClick(e, getViewDescription(clickedView))
+        val clickedView = findViewAtPosition(rootView, e.rawX, e.rawY)
+        val elementLabel = getViewDescription(clickedView)
+        
+        if (OpenReplay.options.debugLogs) {
+            DebugUtils.log("Click detected: $elementLabel at (${e.x}, ${e.y})")
+        }
+        
+        Analytics.sendClick(e, elementLabel)
         return true
     }
 
@@ -433,29 +486,41 @@ class ORGestureListener(private val rootView: View) : GestureDetector.SimpleOnGe
 
     private fun findViewAtPosition(root: View, x: Float, y: Float): View? {
         if (!root.isShown) return null
+        
+        // Get view's position on screen
+        val location = IntArray(2)
+        root.getLocationOnScreen(location)
+        val viewX = location[0]
+        val viewY = location[1]
+        
+        // Check if point is within this view's bounds
+        val isInBounds = x >= viewX && x <= viewX + root.width && 
+                        y >= viewY && y <= viewY + root.height
+        
+        if (!isInBounds) return null
+        
+        // If this is a ViewGroup, check children first (from top to bottom)
         if (root is ViewGroup) {
             for (i in root.childCount - 1 downTo 0) {
                 val child = root.getChildAt(i)
-                if (isPointInsideViewBounds(child, x, y)) {
-                    val foundView = findViewAtPosition(child, x - child.x, y - child.y)
-                    if (foundView != null) return foundView
-                }
+                val foundView = findViewAtPosition(child, x, y)
+                if (foundView != null) return foundView
             }
         }
-        return if (isPointInsideViewBounds(root, x, y)) root else null
+        
+        // Return this view if no child was found
+        return root
     }
 
     private fun isPointInsideViewBounds(view: View, x: Float, y: Float): Boolean {
-        return x >= 0 && y >= 0 && x < view.width && y < view.height
+        val location = IntArray(2)
+        view.getLocationOnScreen(location)
+        return x >= location[0] && x <= location[0] + view.width && 
+               y >= location[1] && y <= location[1] + view.height
     }
 
     private fun getViewDescription(view: View?): String {
-        return when (view) {
-            is EditText -> view.text.toString()
-            is TextView -> view.text.toString()
-            is Button -> view.text.toString()
-            else -> view?.javaClass?.simpleName ?: "Unknown View"
-        }
+        return extractElementLabel(view)
     }
 }
 
