@@ -38,17 +38,16 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.lang.ref.WeakReference
-import java.util.concurrent.Executors
-import java.util.zip.GZIPOutputStream
 import kotlin.coroutines.suspendCoroutine
 
 object ScreenshotManager {
     private var lastTs: String = ""
     private var firstTs: String = ""
-    private var sanitizedElements: MutableList<View> = mutableListOf()
+    private val sanitizedElements: MutableList<WeakReference<View>> = mutableListOf()
     private var quality: Int = 10
     private var minResolution: Int = 320
     private lateinit var uiContext: WeakReference<Context>
+    private var mainHandler: Handler? = null
 
     private var screenShotJob: Job? = null
     private val scope = CoroutineScope(SupervisorJob()
@@ -84,21 +83,28 @@ object ScreenshotManager {
         screenShotJob?.cancel()
         terminate()
         // Clear references to prevent memory leaks
-        sanitizedElements.clear()
+        synchronized(sanitizedElements) {
+            sanitizedElements.clear()
+        }
+        // Clean up handler
+        mainHandler = null
     }
 
+    @Synchronized
     fun addSanitizedElement(view: View) {
         if (OpenReplay.options.debugLogs) {
             DebugUtils.log("Sanitizing view: $view")
         }
-        sanitizedElements.add(view)
+        sanitizedElements.add(WeakReference(view))
     }
 
+    @Synchronized
     fun removeSanitizedElement(view: View) {
         if (OpenReplay.options.debugLogs) {
             DebugUtils.log("Removing sanitized view: $view")
         }
-        sanitizedElements.remove(view)
+        // Remove by matching the actual view
+        sanitizedElements.removeAll { it.get() == view || it.get() == null }
     }
 
     private suspend fun sendScreenshotArchives() = withContext(Dispatchers.IO) {
@@ -106,9 +112,15 @@ object ScreenshotManager {
             val archives = getArchiveFolder().listFiles().orEmpty()
             if (archives.isEmpty()) return@withContext
 
+            val projectKey = OpenReplay.projectKey
+            if (projectKey == null) {
+                DebugUtils.error("Project key is null, cannot send screenshot archives")
+                return@withContext
+            }
+            
             archives.forEach { archive ->
                 NetworkManager.sendImages(
-                    projectKey = OpenReplay.projectKey!!,
+                    projectKey = projectKey,
                     images = archive.readBytes(),
                     name = archive.name
                 ) { success ->
@@ -163,6 +175,14 @@ object ScreenshotManager {
 
     private fun archivateFolder(folder: File) {
         val screenshots = folder.listFiles().orEmpty().sortedBy { it.lastModified() }
+        
+        // Skip if no screenshots
+        if (screenshots.isEmpty()) {
+            if (OpenReplay.options.debugLogs) {
+                DebugUtils.log("No screenshots to archive")
+            }
+            return
+        }
 
         // combine chunked data to zip
         val combinedData = ByteArrayOutputStream()
@@ -189,15 +209,6 @@ object ScreenshotManager {
         }
     }
 
-//    private fun getArchiveFolder(): File {
-//        val context = uiContext.get() ?: throw IllegalStateException("No context")
-//        val archiveFolder = File(context.filesDir, "archives")
-//        if (!archiveFolder.exists()) {
-//            archiveFolder.mkdir()
-//        }
-//        return archiveFolder
-//    }
-
     private fun getArchiveFolder(): File {
         val context = uiContext.get() ?: throw IllegalStateException("No context")
         return File(context.filesDir, "archives").apply { mkdirs() }
@@ -207,15 +218,6 @@ object ScreenshotManager {
         val context = uiContext.get() ?: throw IllegalStateException("No context")
         return File(context.filesDir, "screenshots").apply { mkdirs() }
     }
-
-//    private fun getScreenshotFolder(): File {
-//        val context = uiContext.get() ?: throw IllegalStateException("No context")
-//        val screenShotFolder = File(context.filesDir, "screenshots")
-//        if (!screenShotFolder.exists()) {
-//            screenShotFolder.mkdir()
-//        }
-//        return screenShotFolder
-//    }
 
     private suspend fun captureScreenshot(): Bitmap {
         val activity = OpenReplay.getCurrentActivity()
@@ -246,26 +248,29 @@ object ScreenshotManager {
         }
 
         // Draw masks over sanitized elements
-        sanitizedElements.forEach { sanitizedView ->
-            if (sanitizedView.visibility == View.VISIBLE && sanitizedView.isAttachedToWindow) {
-                val location = IntArray(2)
-                sanitizedView.getLocationInWindow(location)
-                val rootViewLocation = IntArray(2)
-                view.getLocationInWindow(rootViewLocation)
-                val x = location[0] - rootViewLocation[0]
-                val y = location[1] - rootViewLocation[1]
+        synchronized(sanitizedElements) {
+            sanitizedElements.forEach { weakRef ->
+                val sanitizedView = weakRef.get()
+                if (sanitizedView != null && sanitizedView.visibility == View.VISIBLE && sanitizedView.isAttachedToWindow) {
+                    val location = IntArray(2)
+                    sanitizedView.getLocationInWindow(location)
+                    val rootViewLocation = IntArray(2)
+                    view.getLocationInWindow(rootViewLocation)
+                    val x = location[0] - rootViewLocation[0]
+                    val y = location[1] - rootViewLocation[1]
 
-                // Draw the striped mask over the sanitized view
-                canvas.save()
-                canvas.translate(x.toFloat(), y.toFloat())
-                canvas.drawRect(
-                    0f,
-                    0f,
-                    sanitizedView.width.toFloat(),
-                    sanitizedView.height.toFloat(),
-                    maskPaint
-                )
-                canvas.restore()
+                    // Draw the striped mask over the sanitized view
+                    canvas.save()
+                    canvas.translate(x.toFloat(), y.toFloat())
+                    canvas.drawRect(
+                        0f,
+                        0f,
+                        sanitizedView.width.toFloat(),
+                        sanitizedView.height.toFloat(),
+                        maskPaint
+                    )
+                    canvas.restore()
+                }
             }
         }
 
@@ -273,10 +278,14 @@ object ScreenshotManager {
             if (vv is ViewGroup) {
                 for (i in 0 until vv.childCount) {
                     val child = vv.getChildAt(i)
-                    println("iterateComposeView child: ${child::class.java.name}")
+                    if (OpenReplay.options.debugLogs) {
+                        DebugUtils.log("iterateComposeView child: ${child::class.java.name}")
+                    }
 
                     if (child is SanitizableViewGroup) {
-                        println("SanitizableViewGroup")
+                        if (OpenReplay.options.debugLogs) {
+                            DebugUtils.log("SanitizableViewGroup found")
+                        }
                         val location = IntArray(2)
                         child.getLocationInWindow(location)
                         val rootViewLocation = IntArray(2)
@@ -318,7 +327,10 @@ object ScreenshotManager {
             }
         }
 
-        iterateViewGroup(view as ViewGroup)
+        // Only iterate if it's a ViewGroup
+        if (view is ViewGroup) {
+            iterateViewGroup(view)
+        }
 
         return bitmap
     }
@@ -368,29 +380,45 @@ object ScreenshotManager {
         return patternBitmap
     }
 
-    private fun gzipCompress(data: ByteArray): ByteArray {
-        ByteArrayOutputStream().use { byteArrayOutputStream ->
-            GZIPOutputStream(byteArrayOutputStream).use { gzipOutputStream ->
-                gzipOutputStream.write(data)
-            }
-            return byteArrayOutputStream.toByteArray()
-        }
-    }
-
     private suspend fun compress(originalBitmap: Bitmap): ByteArray = suspendCoroutine {
         ByteArrayOutputStream().use { outputStream ->
-            val aspectRatio = originalBitmap.height.toFloat() / originalBitmap.width.toFloat()
-            val newHeight = (minResolution * aspectRatio).toInt()
+            try {
+                // Validate bitmap dimensions
+                if (originalBitmap.width <= 0 || originalBitmap.height <= 0) {
+                    throw IllegalArgumentException("Invalid bitmap dimensions: ${originalBitmap.width}x${originalBitmap.height}")
+                }
+                
+                val aspectRatio = originalBitmap.height.toFloat() / originalBitmap.width.toFloat()
+                val newHeight = (minResolution * aspectRatio).toInt().coerceAtLeast(1)
+                val newWidth = minResolution.coerceAtLeast(1)
 
-            val updated =
-                Bitmap.createScaledBitmap(originalBitmap, minResolution, newHeight, true)
+                val updated = if (originalBitmap.width == newWidth && originalBitmap.height == newHeight) {
+                    // No scaling needed
+                    originalBitmap
+                } else {
+                    Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true)
+                }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                updated.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, quality, outputStream)
-            } else {
-                updated.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        updated.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, quality, outputStream)
+                    } else {
+                        updated.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
+                    }
+                    it.resumeWith(Result.success(outputStream.toByteArray()))
+                } finally {
+                    // Recycle scaled bitmap to free memory (only if different from original)
+                    if (updated != originalBitmap) {
+                        updated.recycle()
+                    }
+                }
+            } catch (e: Exception) {
+                DebugUtils.error("Error compressing bitmap: ${e.message}")
+                it.resumeWith(Result.failure(e))
+            } finally {
+                // Always recycle original bitmap after compression
+                originalBitmap.recycle()
             }
-            it.resumeWith(Result.success(outputStream.toByteArray()))
         }
     }
 
@@ -404,7 +432,12 @@ object ScreenshotManager {
             view.getLocationInWindow(location)
 
 
-            if (!activity.isFinishing)
+            if (!activity.isFinishing) {
+                // Reuse handler to avoid creating new ones
+                if (mainHandler == null) {
+                    mainHandler = Handler(mainLooper)
+                }
+                
                 PixelCopy.request(
                     activity.window,
                     Rect(
@@ -413,13 +446,28 @@ object ScreenshotManager {
                         location[0] + view.width,
                         location[1] + view.height
                     ),
-                    bitmap, {
-                        if (it == PixelCopy.SUCCESS) {
-                            result(bitmap)
+                    bitmap, { copyResult ->
+                        when (copyResult) {
+                            PixelCopy.SUCCESS -> {
+                                result(bitmap)
+                            }
+                            else -> {
+                                if (OpenReplay.options.debugLogs) {
+                                    DebugUtils.error("PixelCopy failed with result: $copyResult, falling back to oldViewToBitmap")
+                                }
+                                // Fallback to old method
+                                result(oldViewToBitmap(view))
+                            }
                         }
                     },
-                    Handler(mainLooper)
+                    mainHandler!!
                 )
+            } else {
+                if (OpenReplay.options.debugLogs) {
+                    DebugUtils.log("Activity is finishing, using oldViewToBitmap method")
+                }
+                result(oldViewToBitmap(view))
+            }
         } else {
             // Old version can keep using view.draw
             result(oldViewToBitmap(view))
