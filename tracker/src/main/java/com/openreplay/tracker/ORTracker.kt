@@ -70,9 +70,18 @@ object OpenReplay {
 
     private var appContext: Context? = null
     private var gestureDetector: GestureDetector? = null
+    private var gestureListener: ORGestureListener? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var broadcastReceiver: BroadcastReceiver? = null
     private var connectivityManager: ConnectivityManager? = null
+    
+    // Reusable Gson instance to avoid creating new instances
+    private val gson by lazy { Gson() }
+    
+    // Session state management
+    @Volatile
+    private var isSessionStarted = false
+    private val sessionLock = Any()
 
 
     fun start(context: Context, projectKey: String, options: OROptions, onStarted: () -> Unit) {
@@ -95,6 +104,15 @@ object OpenReplay {
             appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            // Unregister previous callback if exists
+            networkCallback?.let {
+                try {
+                    connectivityManager?.unregisterNetworkCallback(it)
+                } catch (e: Exception) {
+                    // Ignore if not registered
+                }
+            }
+            
             this.networkCallback = object : ConnectivityManager.NetworkCallback() {
                 override fun onCapabilitiesChanged(
                     network: android.net.Network,
@@ -105,8 +123,20 @@ object OpenReplay {
                 }
             }
 
-            this.connectivityManager?.registerDefaultNetworkCallback(this.networkCallback!!)
+            val callback = this.networkCallback
+            if (callback != null) {
+                this.connectivityManager?.registerDefaultNetworkCallback(callback)
+            }
         } else {
+            // Unregister previous receiver if exists
+            broadcastReceiver?.let {
+                try {
+                    appContext.unregisterReceiver(it)
+                } catch (e: Exception) {
+                    // Ignore if not registered
+                }
+            }
+            
             // For API levels below 24, listen for connectivity changes using BroadcastReceiver
             val intentFilter = IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION)
             this.broadcastReceiver = object : BroadcastReceiver() {
@@ -133,39 +163,58 @@ object OpenReplay {
     }
 
     fun startSession(onStarted: () -> Unit) {
-        sessionStartTs = Date().time
-        SessionRequest.create(appContext!!, false) { sessionResponse ->
-            sessionResponse ?: return@create println("Openreplay: no response from /start request")
-
-            MessageCollector.start(appContext!!)
-
-            with(options) {
-                if (screen) {
-                    ScreenshotManager.setSettings(
-                        settings = getCaptureSettings(
-                            fps = 1,
-                            quality = options.screenshotQuality
-                        )
-                    )
-                    ScreenshotManager.start(appContext!!, sessionStartTs)
+        synchronized(sessionLock) {
+            if (isSessionStarted) {
+                if (options.debugLogs) {
+                    DebugUtils.log("Session already started, skipping duplicate start")
                 }
-                if (logs) LogsListener.start()
-                if (crashes) {
-                    Crash.init(appContext!!)
-                    Crash.start()
-                }
-                if (performances) PerformanceListener.getInstance(appContext!!).start()
-                if (analytics) Analytics.start()
+                return
             }
-            onStarted()
+            
+            val context = appContext
+            if (context == null) {
+                DebugUtils.error("App context is null, cannot start session")
+                return
+            }
+            
+            sessionStartTs = Date().time
+            SessionRequest.create(context, false) { sessionResponse ->
+                if (sessionResponse == null) {
+                    DebugUtils.error("Openreplay: no response from /start request")
+                    return@create
+                }
+
+                MessageCollector.start(context)
+
+                with(options) {
+                    if (screen) {
+                        ScreenshotManager.setSettings(
+                            settings = getCaptureSettings(
+                                fps = 1,
+                                quality = options.screenshotQuality
+                            )
+                        )
+                        ScreenshotManager.start(context, sessionStartTs)
+                    }
+                    if (logs) LogsListener.start()
+                    if (crashes) {
+                        Crash.init(context)
+                        Crash.start()
+                    }
+                    if (performances) PerformanceListener.getInstance(context).start()
+                    if (analytics) Analytics.start()
+                }
+                
+                isSessionStarted = true
+                onStarted()
+            }
         }
     }
 
     fun getLateMessagesFile(context: Context): File {
-        if (lateMessagesFile == null) {
-            lateMessagesFile = File(context.cacheDir, "lateMessages.dat")
+        return lateMessagesFile ?: File(context.cacheDir, "lateMessages.dat").also {
+            lateMessagesFile = it
         }
-        return lateMessagesFile!!
     }
 
     fun coldStart(context: Context, projectKey: String, options: OROptions, onStarted: () -> Unit) {
@@ -186,8 +235,17 @@ object OpenReplay {
             UserDefaults.init(appContext)
         }
 
-        SessionRequest.create(appContext!!, false) { sessionResponse ->
-            sessionResponse ?: return@create println("Openreplay: no response from /start request")
+        val context = appContext
+        if (context == null) {
+            DebugUtils.error("App context is null, cannot start cold start")
+            return
+        }
+        
+        SessionRequest.create(context, false) { sessionResponse ->
+            if (sessionResponse == null) {
+                DebugUtils.error("Openreplay: no response from /start request")
+                return@create
+            }
             ConditionsManager.getConditions()
             MessageCollector.cycleBuffer()
             onStarted()
@@ -200,14 +258,14 @@ object OpenReplay {
                             quality = OpenReplay.options.screenshotQuality
                         )
                     )
-                    ScreenshotManager.start(appContext!!, sessionStartTs)
+                    ScreenshotManager.start(context, sessionStartTs)
                 }
                 if (logs) LogsListener.start()
                 if (crashes) {
-                    Crash.init(appContext!!)
+                    Crash.init(context)
                     Crash.start()
                 }
-                if (performances) PerformanceListener.getInstance(appContext!!).start()
+                if (performances) PerformanceListener.getInstance(context).start()
                 if (analytics) Analytics.start()
             }
         }
@@ -218,12 +276,19 @@ object OpenReplay {
         if (options.debugLogs) {
             DebugUtils.log("Triggering recording with condition: $condition")
         }
-        SessionRequest.create(context = appContext!!, doNotRecord = false) { sessionResponse ->
-            sessionResponse?.let {
+        
+        val context = appContext
+        if (context == null) {
+            DebugUtils.error("App context is null, cannot trigger recording")
+            return
+        }
+        
+        SessionRequest.create(context = context, doNotRecord = false) { sessionResponse ->
+            if (sessionResponse != null) {
                 MessageCollector.syncBuffers()
-                MessageCollector.start(appContext!!)
-            } ?: run {
-                println("Openreplay: no response from /start request")
+                MessageCollector.start(context)
+            } else {
+                DebugUtils.error("Openreplay: no response from /start request")
             }
         }
     }
@@ -254,44 +319,63 @@ object OpenReplay {
     }
 
     fun stop(closeSession: Boolean = true) {
-        ScreenshotManager.stop()
-        Analytics.stop()
-        LogsListener.stop()
-        appContext?.let {
-            PerformanceListener.getInstance(it).stop()
-        }
-        Crash.stop()
-        MessageCollector.stop()
-        
-        // Unregister network callbacks to prevent memory leaks
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            networkCallback?.let {
-                connectivityManager?.unregisterNetworkCallback(it)
+        synchronized(sessionLock) {
+            ScreenshotManager.stop()
+            Analytics.stop()
+            LogsListener.stop()
+            appContext?.let {
+                PerformanceListener.getInstance(it).stop()
             }
-            networkCallback = null
-        } else {
-            broadcastReceiver?.let {
-                try {
-                    appContext?.unregisterReceiver(it)
-                } catch (e: IllegalArgumentException) {
-                    // Receiver was already unregistered
+            Crash.stop()
+            MessageCollector.stop()
+            
+            // Clean up gesture listener
+            gestureListener?.cleanup()
+            gestureListener = null
+            
+            // Unregister network callbacks to prevent memory leaks
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                networkCallback?.let {
+                    try {
+                        connectivityManager?.unregisterNetworkCallback(it)
+                    } catch (e: IllegalArgumentException) {
+                        // Already unregistered
+                        if (options.debugLogs) {
+                            DebugUtils.log("Network callback already unregistered")
+                        }
+                    }
                 }
+                networkCallback = null
+            } else {
+                broadcastReceiver?.let {
+                    try {
+                        appContext?.unregisterReceiver(it)
+                    } catch (e: IllegalArgumentException) {
+                        // Receiver was already unregistered
+                        if (options.debugLogs) {
+                            DebugUtils.log("Broadcast receiver already unregistered")
+                        }
+                    }
+                }
+                broadcastReceiver = null
             }
-            broadcastReceiver = null
+            
+            // Unregister lifecycle callbacks
+            lifecycleManager?.unregister()
+            lifecycleManager = null
+            
+            // Clear gesture detector references
+            gestureDetector = null
+            
+            if (closeSession) {
+                SessionRequest.clear()
+            }
+            
+            connectivityManager = null
+            
+            // Reset session state
+            isSessionStarted = false
         }
-        
-        // Unregister lifecycle callbacks
-        lifecycleManager?.unregister()
-        lifecycleManager = null
-        
-        // Clear gesture detector references
-        gestureDetector = null
-        
-        if (closeSession) {
-            SessionRequest.clear()
-        }
-        
-        connectivityManager = null
     }
 
     fun setUserID(userID: String) {
@@ -318,7 +402,6 @@ object OpenReplay {
     }
 
     fun event(name: String, `object`: Any?) {
-        val gson = Gson()
         val jsonPayload = `object`?.let { gson.toJson(it) } ?: ""
         eventStr(name, jsonPayload)
     }
@@ -343,34 +426,6 @@ object OpenReplay {
         MessageCollector.sendMessage(message)
     }
 
-//    fun setupGestureDetector(context: Context) {
-//        val rootView = (context as Activity).window.decorView.rootView
-//        val gestureListener = ORGestureListener(rootView)
-//        this.gestureDetector = GestureDetector(context, gestureListener)
-//    }
-
-//    @Composable
-//    fun GestureDetectorBox(onGestureDetected: () -> Unit) {
-//        val context = LocalContext.current
-//        setupGestureDetector(context) {
-//            onGestureDetected()
-//        }
-//
-//        Box(
-//            modifier = Modifier
-//                .fillMaxSize()
-//                .pointerInput(Unit) {
-//                    detectTapGestures(
-//                        onTap = {
-//                            onGestureDetected()
-//                        }
-//                    )
-//                }
-//        ) {
-//            Text(text = "Tap me")
-//        }
-//    }
-
     /**
      * Setup gesture detector for a specific activity.
      * This method should be called from LifecycleManager when an activity is resumed.
@@ -381,7 +436,7 @@ object OpenReplay {
      */
     fun setupGestureDetectorForActivity(activity: Activity) {
         val rootView = activity.window.decorView.rootView
-        val gestureListener = ORGestureListener(rootView)
+        this.gestureListener = ORGestureListener(rootView)
         this.gestureDetector = GestureDetector(activity, gestureListener)
         
         if (options.debugLogs) {
