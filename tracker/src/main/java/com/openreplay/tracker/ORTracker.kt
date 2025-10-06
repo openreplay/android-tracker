@@ -459,7 +459,7 @@ object OpenReplay {
     }
 
     fun setUserID(userID: String) {
-        val message = ORMobileUserID(iD = userID)
+        val message = ORMobileUserID(id = userID)
         MessageCollector.sendMessage(message)
     }
 
@@ -468,8 +468,8 @@ object OpenReplay {
         MessageCollector.sendMessage(message)
     }
 
-    fun userAnonymousID(iD: String) {
-        val message = ORMobileUserID(iD = iD)
+    fun userAnonymousID(id: String) {
+        val message = ORMobileUserID(id = id)
         MessageCollector.sendMessage(message)
     }
 

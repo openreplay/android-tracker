@@ -91,7 +91,7 @@ object ConditionsManager {
                 }
 
                 is ORMobileUserID -> {
-                    if (activeCon.op(msg.iD)) {
+                    if (activeCon.op(msg.id)) {
                         return activeCon.name
                     }
                 }
