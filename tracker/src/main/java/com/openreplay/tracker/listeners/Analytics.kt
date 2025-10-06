@@ -37,6 +37,7 @@ import androidx.compose.ui.platform.debugInspectorInfo
 import androidx.compose.ui.platform.testTag
 import com.openreplay.tracker.OpenReplay
 import com.openreplay.tracker.managers.DebugUtils
+import java.lang.ref.WeakReference
 
 enum class SwipeDirection {
     LEFT, RIGHT, UP, DOWN, UNDEFINED;
@@ -55,10 +56,12 @@ enum class SwipeDirection {
 }
 
 object Analytics {
+    @Volatile
     private var enabled: Boolean = false
-    private var observedViews: MutableList<View> = mutableListOf()
-    private var observedInputs: MutableList<EditText> = mutableListOf()
+    private val observedViews: MutableList<WeakReference<View>> = mutableListOf()
+    private val observedInputs: MutableList<WeakReference<EditText>> = mutableListOf()
 
+    @Synchronized
     fun start() {
         enabled = true
     }
@@ -66,51 +69,77 @@ object Analytics {
     fun sendClick(ev: MotionEvent, label: String? = null) {
         if (!enabled) return
 
-        val message = ORMobileClickEvent(label = label ?: "Button", x = ev.x, y = ev.y)
-        MessageCollector.sendMessage(message)
+        try {
+            val message = ORMobileClickEvent(label = label ?: "Unknown", x = ev.x, y = ev.y)
+            MessageCollector.sendMessage(message)
+        } catch (e: Exception) {
+            if (OpenReplay.options.debugLogs) {
+                DebugUtils.error("Error sending click event: ${e.message}")
+            }
+        }
     }
 
     fun sendSwipe(direction: SwipeDirection, x: Float, y: Float) {
         if (!enabled) return
 
-        val message = ORMobileSwipeEvent(
-            direction = direction.name.lowercase(), x = x, y = y, label = "Swipe"
-        )
-        MessageCollector.sendMessage(message)
+        try {
+            val message = ORMobileSwipeEvent(
+                direction = direction.name.lowercase(), x = x, y = y, label = "Swipe"
+            )
+            MessageCollector.sendMessage(message)
+        } catch (e: Exception) {
+            if (OpenReplay.options.debugLogs) {
+                DebugUtils.error("Error sending swipe event: ${e.message}")
+            }
+        }
     }
 
     fun sendTextInput(value: String, label: String?, masked: Boolean = false) {
         if (!enabled) return
 
-        val message = ORMobileInputEvent(
-            value = value,
-            valueMasked = masked,
-            label = label ?: "Input"
-        )
-        MessageCollector.sendMessage(message)
+        try {
+            val message = ORMobileInputEvent(
+                value = value,
+                valueMasked = masked,
+                label = label ?: "Input"
+            )
+            MessageCollector.sendMessage(message)
+        } catch (e: Exception) {
+            if (OpenReplay.options.debugLogs) {
+                DebugUtils.error("Error sending text input event: ${e.message}")
+            }
+        }
     }
 
+    @Synchronized
     fun stop() {
         enabled = false
+        // Clear observed views to prevent memory leaks
+        observedViews.clear()
+        observedInputs.clear()
     }
 
+    @Synchronized
     fun addObservedView(view: View, screenName: String, viewName: String) {
         view.tag = "Screen: $screenName, View: $viewName"
-        observedViews.add(view)
+        observedViews.add(WeakReference(view))
     }
 
+    @Synchronized
     fun addObservedInput(editText: EditText) {
-        observedInputs.add(editText)
+        observedInputs.add(WeakReference(editText))
         editText.trackTextInput()
-//        editText.setOnEditorActionListener { v, actionId, event ->
-//            // Handle input finished event here
-//            true
-//        }
     }
 
     fun sendBackgroundEvent(value: ULong) {
-        val message = ORMobilePerformanceEvent("background", value)
-        MessageCollector.sendMessage(message)
+        try {
+            val message = ORMobilePerformanceEvent("background", value)
+            MessageCollector.sendMessage(message)
+        } catch (e: Exception) {
+            if (OpenReplay.options.debugLogs) {
+                DebugUtils.error("Error sending background event: ${e.message}")
+            }
+        }
     }
 }
 
@@ -139,7 +168,7 @@ open class TrackingActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapUp(e: MotionEvent): Boolean {
-                val clickedView = findViewAtPosition(rootView, e.x, e.y)
+                val clickedView = findViewAtPosition(rootView, e.rawX, e.rawY)
                 val description = getViewDescription(clickedView)
                 Analytics.sendClick(e, description)
                 return true
@@ -177,8 +206,13 @@ open class TrackingActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
-
         println("TrackingActivity ${this::class.java.simpleName} stopped")
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Clean up handler callbacks to prevent memory leaks
+        handler.removeCallbacks(endOfScrollRunnable)
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -194,21 +228,30 @@ open class TrackingActivity : AppCompatActivity() {
     }
 
     private fun findViewAtPosition(root: View, x: Float, y: Float): View? {
-        if (!View::class.java.isInstance(root) || !root.isShown) return null
+        if (!root.isShown) return null
+        
+        // Get view's position on screen
+        val location = IntArray(2)
+        root.getLocationOnScreen(location)
+        val viewX = location[0]
+        val viewY = location[1]
+        
+        // Check if point is within this view's bounds
+        val isInBounds = x >= viewX && x <= viewX + root.width && 
+                        y >= viewY && y <= viewY + root.height
+        
+        if (!isInBounds) return null
+        
+        // If this is a ViewGroup, check children first (from top to bottom)
         if (root is ViewGroup) {
             for (i in root.childCount - 1 downTo 0) {
                 val child = root.getChildAt(i)
-                val location = IntArray(2)
-                child.getLocationOnScreen(location)
-                val rect = Rect(
-                    location[0], location[1], location[0] + child.width, location[1] + child.height
-                )
-                if (rect.contains(x.toInt(), y.toInt())) {
-                    val foundView = findViewAtPosition(child, x, y)
-                    if (foundView != null) return foundView
-                }
+                val foundView = findViewAtPosition(child, x, y)
+                if (foundView != null) return foundView
             }
         }
+        
+        // Return this view if no child was found
         return root
     }
 
@@ -235,7 +278,6 @@ fun View.trackViewAppearances(screenName: String, viewName: String) {
 fun EditText.trackTextInput(label: String? = null, masked: Boolean = false) {
     this.setOnFocusChangeListener { view, hasFocus ->
         if (!hasFocus) {
-            // The EditText has lost focus
             val sender = view as EditText
             textInputFinished(sender, label, masked)
         }
@@ -250,28 +292,6 @@ fun EditText.trackTextInput(label: String? = null, masked: Boolean = false) {
             false
         }
     }
-
-
-//    this.doAfterTextChanged { text ->
-//        if (OpenReplay.options.debugLogs) {
-//            DebugUtils.log(">>>>>Text finish ${text.toString()} ${this.hint ?: "no_placeholder"}")
-//        }
-//
-//        val textToSend =
-//            if (this.inputType and InputType.TYPE_TEXT_VARIATION_PASSWORD == InputType.TYPE_TEXT_VARIATION_PASSWORD) {
-//                "***"
-//            } else {
-//                text.toString()
-//            }
-//
-//        MessageCollector.sendMessage(
-//            ORMobileInputEvent(
-//                value = textToSend,
-//                valueMasked = isPasswordInputType() || masked,
-//                label = this.hint?.toString() ?: ""
-//            )
-//        )
-//    }
 }
 
 fun textInputFinished(view: EditText, label: String?, masked: Boolean) {
@@ -341,6 +361,9 @@ class ActivityLifecycleTracker : LifecycleEventObserver {
 /**
  * Extract comprehensive element properties from a view for tracking.
  * Includes: resource ID, text content, content description, and view type.
+ * 
+ * @param view The view to extract properties from
+ * @return A formatted string with element properties separated by " | "
  */
 fun extractElementLabel(view: View?): String {
     if (view == null) return "Unknown View"
@@ -351,44 +374,74 @@ fun extractElementLabel(view: View?): String {
     try {
         if (view.id != View.NO_ID) {
             val resourceName = view.resources.getResourceEntryName(view.id)
-            parts.add("id:$resourceName")
+            if (resourceName.isNotBlank()) {
+                parts.add("id:$resourceName")
+            }
         }
     } catch (e: Exception) {
-        // Resource not found, skip
+        // Resource not found or invalid, skip
+        if (OpenReplay.options.debugLogs) {
+            DebugUtils.log("Unable to get resource name for view ID: ${view.id}")
+        }
     }
     
     // Add text content if available
-    val text = when (view) {
-        is EditText -> view.text.toString().take(50)
-        is TextView -> view.text.toString().take(50)
-        is Button -> view.text.toString().take(50)
-        else -> null
-    }
-    
-    if (!text.isNullOrBlank()) {
-        parts.add("text:$text")
+    try {
+        val text = when (view) {
+            is EditText -> view.text?.toString()
+            is TextView -> view.text?.toString()
+            is Button -> view.text?.toString()
+            else -> null
+        }
+        
+        if (!text.isNullOrBlank()) {
+            // Sanitize and truncate text
+            val sanitized = text.trim().replace("\n", " ").take(50)
+            if (sanitized.isNotBlank()) {
+                parts.add("text:$sanitized")
+            }
+        }
+    } catch (e: Exception) {
+        // Error reading text, skip
+        if (OpenReplay.options.debugLogs) {
+            DebugUtils.log("Error reading text from view: ${e.message}")
+        }
     }
     
     // Add content description if available
-    if (!view.contentDescription.isNullOrBlank()) {
-        parts.add("desc:${view.contentDescription.toString().take(50)}")
+    try {
+        val desc = view.contentDescription?.toString()
+        if (!desc.isNullOrBlank()) {
+            val sanitized = desc.trim().replace("\n", " ").take(50)
+            if (sanitized.isNotBlank()) {
+                parts.add("desc:$sanitized")
+            }
+        }
+    } catch (e: Exception) {
+        // Error reading content description, skip
     }
     
     // Add view class name
-    parts.add("type:${view.javaClass.simpleName}")
+    try {
+        val className = view.javaClass.simpleName
+        if (className.isNotBlank()) {
+            parts.add("type:$className")
+        }
+    } catch (e: Exception) {
+        parts.add("type:View")
+    }
     
     return if (parts.isNotEmpty()) {
         parts.joinToString(" | ")
     } else {
-        view.javaClass.simpleName
+        "Unknown View"
     }
 }
 
+/**
+ * Recursively track all EditText inputs in a view hierarchy.
+ */
 fun trackAllTextViews(view: View) {
-//    if (view is TextView) {
-//        Analytics.addObservedView(view, "MainActivity", "TextView")
-//    }
-
     if (view is EditText) {
         Analytics.addObservedInput(view)
     }
@@ -409,28 +462,9 @@ class GlobalViewTracker : LifecycleEventObserver {
     }
 
     private fun setupGlobalLayoutListener(activity: AppCompatActivity) {
-//        val rootView = activity.findViewById<ViewGroup>(android.R.id.content)
-
         activity.window.decorView.post {
             trackAllTextViews(activity.window.decorView)
         }
-
-//        rootView.viewTreeObserver.addOnGlobalLayoutListener {
-//            // Iterate over all the views in the layout
-//            for (i in 0 until rootView.childCount) {
-//                val view = rootView.getChildAt(i)
-//                inspectView(view, activity)
-//            }
-//        }
-    }
-
-    private fun inspectView(view: View, activity: AppCompatActivity) {
-        val screenName = activity::class.java.simpleName
-        val viewName = view::class.java.simpleName
-        val visibility = view.visibility == View.VISIBLE
-
-        // You might want to filter views further here
-        Log.d("ViewTracker", "Screen: $screenName, View: $viewName, Visible: $visibility")
     }
 }
 
@@ -451,6 +485,14 @@ class ORGestureListener(private val rootView: View) : GestureDetector.SimpleOnGe
 
             Analytics.sendSwipe(swipeDirection, lastX, lastY)
         }
+    }
+
+    /**
+     * Clean up handler callbacks to prevent memory leaks.
+     * Call this when the gesture listener is no longer needed.
+     */
+    fun cleanup() {
+        handler.removeCallbacks(endOfScrollRunnable)
     }
 
     override fun onSingleTapUp(e: MotionEvent): Boolean {
