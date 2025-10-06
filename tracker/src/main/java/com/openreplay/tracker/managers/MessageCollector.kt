@@ -1,6 +1,6 @@
 package com.openreplay.tracker.managers
 
-import NetworkManager
+import com.openreplay.tracker.managers.NetworkManager
 import android.content.Context
 import android.os.Handler
 import com.openreplay.tracker.OpenReplay

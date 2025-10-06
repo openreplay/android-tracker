@@ -1,6 +1,6 @@
 package com.openreplay.tracker.managers
 
-import NetworkManager
+import com.openreplay.tracker.managers.NetworkManager
 import com.openreplay.tracker.OpenReplay
 import com.openreplay.tracker.models.ORMessage
 import com.openreplay.tracker.models.script.*

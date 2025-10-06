@@ -1,7 +1,7 @@
 package com.openreplay.tracker.managers
 
-import NetworkManager
-import NetworkManager.sessionId
+import com.openreplay.tracker.managers.NetworkManager
+import com.openreplay.tracker.managers.NetworkManager.sessionId
 import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap

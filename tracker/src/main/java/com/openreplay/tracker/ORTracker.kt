@@ -1,6 +1,6 @@
 package com.openreplay.tracker
 
-import NetworkManager
+
 import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -30,6 +30,7 @@ import com.openreplay.tracker.listeners.LogsListener
 import com.openreplay.tracker.listeners.ORGestureListener
 import com.openreplay.tracker.listeners.PerformanceListener
 import com.openreplay.tracker.listeners.sendNetworkMessage
+import com.openreplay.tracker.managers.NetworkManager
 import com.openreplay.tracker.managers.ConditionsManager
 import com.openreplay.tracker.managers.DebugUtils
 import com.openreplay.tracker.managers.MessageCollector
