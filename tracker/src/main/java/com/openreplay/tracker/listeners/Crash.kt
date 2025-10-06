@@ -12,82 +12,139 @@ import java.lang.ref.WeakReference
 import com.openreplay.tracker.managers.NetworkManager
 
 object Crash {
-    private var fileUrl: File? = null
+    private var crashFile: File? = null
+    @Volatile
     private var isActive = false
     private var contextRef: WeakReference<Context>? = null
+    private var previousHandler: Thread.UncaughtExceptionHandler? = null
+    private val crashLock = Any()
 
     fun init(context: Context) {
-        contextRef = WeakReference(context.applicationContext) // Use application context
+        synchronized(crashLock) {
+            contextRef = WeakReference(context.applicationContext)
 
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val cacheDir = context.cacheDir // Access cacheDir on background thread
-                fileUrl = File(cacheDir, "ASCrash.dat")
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val cacheDir = context.cacheDir
+                    val file = File(cacheDir, "ASCrash.dat")
+                    crashFile = file
 
-                if (fileUrl!!.exists()) {
-                    val crashData = fileUrl!!.readBytes()
-                    NetworkManager.sendLateMessage(crashData) { success ->
-                        if (success) {
-                            fileUrl!!.delete()
+                    if (file.exists()) {
+                        val crashData = file.readBytes()
+                        NetworkManager.sendLateMessage(crashData) { success ->
+                            if (success) {
+                                deleteFile(file)
+                            } else {
+                                DebugUtils.error("Failed to send late crash data")
+                            }
                         }
                     }
+                } catch (e: Exception) {
+                    DebugUtils.error("Error in Crash.init: ${e.message}")
                 }
-            } catch (e: Exception) {
-                DebugUtils.log("Error in Crash.init: ${e.message}")
             }
         }
     }
 
     fun start() {
-        Thread.setDefaultUncaughtExceptionHandler { _, e ->
-            DebugUtils.log("Captured crash: ${e.localizedMessage}")
+        synchronized(crashLock) {
+            if (isActive) {
+                DebugUtils.log("Crash handler already active")
+                return
+            }
+
+            // Save previous handler to chain to it
+            previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+
+            Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+                handleCrash(throwable)
+                
+                // Chain to previous handler or terminate app
+                previousHandler?.uncaughtException(thread, throwable)
+                    ?: kotlin.run {
+                        // No previous handler, terminate the process
+                        android.os.Process.killProcess(android.os.Process.myPid())
+                        System.exit(10)
+                    }
+            }
+            isActive = true
+        }
+    }
+
+    private fun handleCrash(e: Throwable) {
+        try {
+            DebugUtils.error("Captured crash: ${e.javaClass.name} - ${e.message}")
+            
             val message = ORMobileCrash(
                 name = e.javaClass.name,
-                reason = e.localizedMessage ?: "",
-                stacktrace = e.stackTrace.joinToString(separator = "\n") { it.toString() }
+                reason = e.message ?: e.localizedMessage ?: "Unknown error",
+                stacktrace = e.stackTraceToString()
             )
             val messageData = message.contentData()
 
-            CoroutineScope(Dispatchers.IO).launch {
+            // Save to file synchronously (we're about to crash)
+            val file = crashFile
+            if (file != null) {
                 try {
-                    fileUrl?.writeBytes(messageData)
-                    NetworkManager.sendMessage(messageData) { success ->
-                        if (success) {
-                            deleteFile(fileUrl!!)
-                        }
-                    }
+                    file.writeBytes(messageData)
+                    DebugUtils.log("Crash data saved to file")
                 } catch (ex: Exception) {
-                    DebugUtils.log("Error saving or sending crash data: ${ex.message}")
+                    DebugUtils.error("Failed to save crash to file: ${ex.message}")
                 }
             }
+
+            // Attempt to send immediately (may not complete if app crashes)
+            try {
+                NetworkManager.sendMessage(messageData) { success ->
+                    if (success && file != null) {
+                        deleteFile(file)
+                    }
+                }
+            } catch (ex: Exception) {
+                DebugUtils.error("Failed to send crash data: ${ex.message}")
+            }
+        } catch (ex: Exception) {
+            // Last resort - don't let crash handler crash
+            System.err.println("OpenReplay crash handler failed: ${ex.message}")
         }
-        isActive = true
     }
 
     fun sendLateError(exception: Exception) {
         val message = ORMobileCrash(
             name = exception.javaClass.name,
-            reason = exception.localizedMessage ?: "",
-            stacktrace = exception.stackTrace.joinToString(separator = "\n") { it.toString() }
+            reason = exception.message ?: exception.localizedMessage ?: "Unknown error",
+            stacktrace = exception.stackTraceToString()
         )
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 NetworkManager.sendLateMessage(message.contentData()) { success ->
                     if (success) {
-                        deleteFile(fileUrl!!)
+                        crashFile?.let { deleteFile(it) }
                     }
                 }
             } catch (e: Exception) {
-                DebugUtils.log("Error sending late error: ${e.message}")
+                DebugUtils.error("Error sending late error: ${e.message}")
             }
         }
     }
 
     fun stop() {
-        if (isActive) {
-            Thread.setDefaultUncaughtExceptionHandler(null)
+        synchronized(crashLock) {
+            if (!isActive) {
+                return
+            }
+            
+            // Restore previous handler
+            Thread.setDefaultUncaughtExceptionHandler(previousHandler)
+            previousHandler = null
             isActive = false
+            
+            // Clear context reference
+            contextRef?.clear()
+            contextRef = null
+            
+            DebugUtils.log("Crash handler stopped")
         }
     }
 

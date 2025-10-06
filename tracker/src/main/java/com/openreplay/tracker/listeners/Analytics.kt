@@ -117,6 +117,19 @@ object Analytics {
         // Clear observed views to prevent memory leaks
         observedViews.clear()
         observedInputs.clear()
+        
+        if (OpenReplay.options.debugLogs) {
+            DebugUtils.log("Analytics stopped")
+        }
+    }
+    
+    /**
+     * Remove dead weak references to prevent memory accumulation
+     */
+    @Synchronized
+    fun cleanupDeadReferences() {
+        observedViews.removeAll { it.get() == null }
+        observedInputs.removeAll { it.get() == null }
     }
 
     @Synchronized
@@ -200,18 +213,32 @@ open class TrackingActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-
-        println("TrackingActivity started ${this::class.java.simpleName} started")
+        if (OpenReplay.options.debugLogs) {
+            DebugUtils.log("TrackingActivity started: ${this::class.java.simpleName}")
+        }
     }
 
     override fun onStop() {
         super.onStop()
-        println("TrackingActivity ${this::class.java.simpleName} stopped")
+        if (OpenReplay.options.debugLogs) {
+            DebugUtils.log("TrackingActivity stopped: ${this::class.java.simpleName}")
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         // Clean up handler callbacks to prevent memory leaks
+        handler.removeCallbacks(endOfScrollRunnable)
+        handler.removeCallbacksAndMessages(null)
+        
+        if (OpenReplay.options.debugLogs) {
+            DebugUtils.log("TrackingActivity destroyed: ${this::class.java.simpleName}")
+        }
+    }
+    
+    override fun onPause() {
+        super.onPause()
+        // Remove pending callbacks when activity is paused
         handler.removeCallbacks(endOfScrollRunnable)
     }
 
@@ -326,34 +353,16 @@ fun EditText.sanitize() {
 
 class ActivityLifecycleTracker : LifecycleEventObserver {
     override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
+        if (!OpenReplay.options.debugLogs) return
+        
         when (event) {
-            Lifecycle.Event.ON_CREATE -> {
-                println("Activity created")
-            }
-
-            Lifecycle.Event.ON_START -> {
-                println("Activity started")
-            }
-
-            Lifecycle.Event.ON_RESUME -> {
-                println("Activity resumed")
-            }
-
-            Lifecycle.Event.ON_PAUSE -> {
-                println("Activity paused")
-            }
-
-            Lifecycle.Event.ON_STOP -> {
-                println("Activity stopped")
-            }
-
-            Lifecycle.Event.ON_DESTROY -> {
-                println("Activity destroyed")
-            }
-
-            Lifecycle.Event.ON_ANY -> {
-                println("Activity any")
-            }
+            Lifecycle.Event.ON_CREATE -> DebugUtils.log("Activity lifecycle: created")
+            Lifecycle.Event.ON_START -> DebugUtils.log("Activity lifecycle: started")
+            Lifecycle.Event.ON_RESUME -> DebugUtils.log("Activity lifecycle: resumed")
+            Lifecycle.Event.ON_PAUSE -> DebugUtils.log("Activity lifecycle: paused")
+            Lifecycle.Event.ON_STOP -> DebugUtils.log("Activity lifecycle: stopped")
+            Lifecycle.Event.ON_DESTROY -> DebugUtils.log("Activity lifecycle: destroyed")
+            Lifecycle.Event.ON_ANY -> {} // Ignore ON_ANY to reduce noise
         }
     }
 }
@@ -493,6 +502,11 @@ class ORGestureListener(private val rootView: View) : GestureDetector.SimpleOnGe
      */
     fun cleanup() {
         handler.removeCallbacks(endOfScrollRunnable)
+        handler.removeCallbacksAndMessages(null)
+        
+        if (OpenReplay.options.debugLogs) {
+            DebugUtils.log("ORGestureListener cleaned up")
+        }
     }
 
     override fun onSingleTapUp(e: MotionEvent): Boolean {
@@ -577,8 +591,9 @@ fun Modifier.trackTouchEvents(label: String? = "Unknown"): Modifier {
                 val event = awaitPointerEvent()
                 event.changes.forEach { change ->
                     if (change.pressed) {
-//                        position = "X: ${change.position.x}, Y: ${change.position.y}"
-                        println("$label X: ${change.position.x}, Y: ${change.position.y}")
+                        if (OpenReplay.options.debugLogs) {
+                            DebugUtils.log("Touch at $label: (${change.position.x}, ${change.position.y})")
+                        }
                         change.consume()
                         Analytics.sendClick(
                             MotionEvent.obtain(
@@ -598,15 +613,21 @@ fun Modifier.trackTouchEvents(label: String? = "Unknown"): Modifier {
         detectDragGestures(onDragStart = { offset ->
             initialX = offset.x
             initialY = offset.y
-            println("onDragStart at ${offset.x}, ${offset.y}")
+            if (OpenReplay.options.debugLogs) {
+                DebugUtils.log("Drag started at (${offset.x}, ${offset.y})")
+            }
         }, onDragEnd = {
             val distanceX = currentX - initialX
             val distanceY = currentY - initialY
             val direction = SwipeDirection.fromDistances(distanceX, distanceY)
-            println("onDragEnd with swipe direction: $direction at ($currentX, $currentY)")
+            if (OpenReplay.options.debugLogs) {
+                DebugUtils.log("Drag ended: $direction at ($currentX, $currentY)")
+            }
             Analytics.sendSwipe(direction, currentX, currentY)
         }, onDragCancel = {
-            println("onDragCancel")
+            if (OpenReplay.options.debugLogs) {
+                DebugUtils.log("Drag cancelled")
+            }
         }, onDrag = { change, _ ->
             currentX = change.position.x
             currentY = change.position.y
