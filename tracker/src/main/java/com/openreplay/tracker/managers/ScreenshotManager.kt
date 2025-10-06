@@ -83,6 +83,8 @@ object ScreenshotManager {
     fun stop() {
         screenShotJob?.cancel()
         terminate()
+        // Clear references to prevent memory leaks
+        sanitizedElements.clear()
     }
 
     fun addSanitizedElement(view: View) {

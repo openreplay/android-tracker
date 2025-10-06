@@ -70,22 +70,27 @@ object OpenReplay {
 
     private var appContext: Context? = null
     private var gestureDetector: GestureDetector? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var broadcastReceiver: BroadcastReceiver? = null
+    private var connectivityManager: ConnectivityManager? = null
 
 
     fun start(context: Context, projectKey: String, options: OROptions, onStarted: () -> Unit) {
-        NetworkManager.initialize(context)
+        // Use application context to avoid leaks
+        val appContext = context.applicationContext
+        NetworkManager.initialize(appContext)
         CoroutineScope(Dispatchers.IO).launch {
-            UserDefaults.init(context)
+            UserDefaults.init(appContext)
         }
-        this.appContext = context // Use application context to avoid leaks
+        this.appContext = appContext
         this.options = this.options.merge(options)
         this.projectKey = projectKey
 
-        val connectivityManager =
-            context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        this.connectivityManager =
+            appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            val networkCallback = object : ConnectivityManager.NetworkCallback() {
+            this.networkCallback = object : ConnectivityManager.NetworkCallback() {
                 override fun onCapabilitiesChanged(
                     network: android.net.Network,
                     capabilities: NetworkCapabilities
@@ -95,19 +100,20 @@ object OpenReplay {
                 }
             }
 
-            connectivityManager.registerDefaultNetworkCallback(networkCallback)
+            this.connectivityManager?.registerDefaultNetworkCallback(this.networkCallback!!)
         } else {
             // For API levels below 24, listen for connectivity changes using BroadcastReceiver
             val intentFilter = IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION)
-            context.registerReceiver(object : BroadcastReceiver() {
+            this.broadcastReceiver = object : BroadcastReceiver() {
                 override fun onReceive(context: Context?, intent: Intent?) {
-                    val activeNetworkInfo = connectivityManager.activeNetworkInfo
+                    val activeNetworkInfo = connectivityManager?.activeNetworkInfo
                     if (activeNetworkInfo != null && activeNetworkInfo.isConnected) {
                         // Call your method to handle connectivity change
                         startSession(onStarted)
                     }
                 }
-            }, intentFilter)
+            }
+            appContext.registerReceiver(this.broadcastReceiver, intentFilter)
         }
         checkForLateMessages()
     }
@@ -123,7 +129,6 @@ object OpenReplay {
 
     fun startSession(onStarted: () -> Unit) {
         sessionStartTs = Date().time
-        setupGestureDetector(appContext!!)
         SessionRequest.create(appContext!!, false) { sessionResponse ->
             sessionResponse ?: return@create println("Openreplay: no response from /start request")
 
@@ -162,14 +167,16 @@ object OpenReplay {
     }
 
     fun coldStart(context: Context, projectKey: String, options: OROptions, onStarted: () -> Unit) {
-        NetworkManager.initialize(context)
-        this.appContext = context // Use application context to avoid leaks
+        // Use application context to avoid leaks
+        val appContext = context.applicationContext
+        NetworkManager.initialize(appContext)
+        this.appContext = appContext
         this.options = options
         this.projectKey = projectKey
         this.bufferingMode = true
 
         CoroutineScope(Dispatchers.IO).launch {
-            UserDefaults.init(context)
+            UserDefaults.init(appContext)
         }
 
         SessionRequest.create(appContext!!, false) { sessionResponse ->
@@ -243,12 +250,41 @@ object OpenReplay {
         ScreenshotManager.stop()
         Analytics.stop()
         LogsListener.stop()
-        PerformanceListener.getInstance(appContext!!).stop()
+        appContext?.let {
+            PerformanceListener.getInstance(it).stop()
+        }
         Crash.stop()
         MessageCollector.stop()
+        
+        // Unregister network callbacks to prevent memory leaks
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            networkCallback?.let {
+                connectivityManager?.unregisterNetworkCallback(it)
+            }
+            networkCallback = null
+        } else {
+            broadcastReceiver?.let {
+                try {
+                    appContext?.unregisterReceiver(it)
+                } catch (e: IllegalArgumentException) {
+                    // Receiver was already unregistered
+                }
+            }
+            broadcastReceiver = null
+        }
+        
+        // Unregister lifecycle callbacks
+        lifecycleManager?.unregister()
+        lifecycleManager = null
+        
+        // Clear gesture detector references
+        gestureDetector = null
+        
         if (closeSession) {
             SessionRequest.clear()
         }
+        
+        connectivityManager = null
     }
 
     fun setUserID(userID: String) {
@@ -328,27 +364,31 @@ object OpenReplay {
 //        }
 //    }
 
-    fun setupGestureDetector(context: Context) {
-        val activity = context as Activity
+    /**
+     * Setup gesture detector for a specific activity.
+     * This method should be called from LifecycleManager when an activity is resumed.
+     * Using WeakReference pattern through LifecycleManager prevents memory leaks.
+     */
+    fun setupGestureDetectorForActivity(activity: Activity) {
         val rootView = activity.window.decorView.rootView
 
         val gestureListener = ORGestureListener(rootView)
-        val gestureDetector = GestureDetector(context, gestureListener)
+        this.gestureDetector = GestureDetector(activity, gestureListener)
 
         // Set up gesture detection for legacy Android views
         rootView.setOnTouchListener { v, event ->
-            gestureDetector.onTouchEvent(event)
+            gestureDetector?.onTouchEvent(event)
+            false
         }
 
         // Handle Jetpack Compose views
         if (rootView is ViewGroup) {
-            println("jetpack view listener")
             for (i in 0 until rootView.childCount) {
                 val child = rootView.getChildAt(i)
                 if (child is AbstractComposeView) {
-                    println("child listener")
                     child.setOnTouchListener { v, event ->
-                        gestureDetector.onTouchEvent(event)
+                        gestureDetector?.onTouchEvent(event)
+                        false
                     }
                 }
             }
