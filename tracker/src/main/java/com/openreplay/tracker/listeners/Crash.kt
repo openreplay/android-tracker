@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.lang.ref.WeakReference
+import com.openreplay.tracker.managers.NetworkManager
 
 object Crash {
     private var fileUrl: File? = null

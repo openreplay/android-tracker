@@ -11,6 +11,7 @@ import com.openreplay.tracker.managers.DebugUtils
 import com.openreplay.tracker.managers.UserDefaults
 import kotlin.math.abs
 import java.util.concurrent.atomic.AtomicReference
+import com.openreplay.tracker.managers.NetworkManager
 
 object SessionRequest {
     private val params = mutableMapOf<String, Any>()
