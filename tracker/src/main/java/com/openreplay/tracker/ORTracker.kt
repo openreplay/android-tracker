@@ -402,6 +402,14 @@ object OpenReplay {
     fun getSessionID(): String {
         return SessionRequest.getSessionId() ?: ""
     }
+
+    /**
+     * Get the current active activity.
+     * Returns null if no activity is currently active.
+     */
+    fun getCurrentActivity(): Activity? {
+        return lifecycleManager?.currentActivity
+    }
 }
 
 fun getCaptureSettings(fps: Int, quality: RecordingQuality): Triple<Int, Int, Int> {

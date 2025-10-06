@@ -218,8 +218,8 @@ object ScreenshotManager {
 //    }
 
     private suspend fun captureScreenshot(): Bitmap {
-        val activity =
-            uiContext.get() as? Activity ?: throw IllegalStateException("No Activity")
+        val activity = OpenReplay.getCurrentActivity()
+            ?: throw IllegalStateException("No Activity available for screenshot")
         return suspendCoroutine { coroutine ->
             activity.screenShot { shot ->
                 coroutine.resumeWith(Result.success(shot))
