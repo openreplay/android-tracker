@@ -436,8 +436,9 @@ object OpenReplay {
      */
     fun setupGestureDetectorForActivity(activity: Activity) {
         val rootView = activity.window.decorView.rootView
-        this.gestureListener = ORGestureListener(rootView)
-        this.gestureDetector = GestureDetector(activity, gestureListener)
+        val listener = ORGestureListener(rootView)
+        this.gestureListener = listener
+        this.gestureDetector = GestureDetector(activity, listener)
         
         if (options.debugLogs) {
             DebugUtils.log("Gesture detector setup for activity: ${activity.localClassName}")
