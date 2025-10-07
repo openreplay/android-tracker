@@ -179,7 +179,8 @@ object OpenReplay {
             }
             
             sessionStartTs = Date().time
-            SessionRequest.create(context, false) { sessionResponse ->
+            val activityContext = lifecycleManager?.currentActivity
+            SessionRequest.create(context, activityContext, false) { sessionResponse ->
                 if (sessionResponse == null) {
                     DebugUtils.error("Openreplay: no response from /start request")
                     return@create
@@ -226,6 +227,7 @@ object OpenReplay {
         this.options = options
         this.projectKey = projectKey
         this.bufferingMode = true
+        sessionStartTs = Date().time
 
         // Initialize LifecycleManager immediately to capture current activity
         if (this.lifecycleManager == null) {
@@ -242,7 +244,8 @@ object OpenReplay {
             return
         }
         
-        SessionRequest.create(context, false) { sessionResponse ->
+        val activityContext = lifecycleManager?.currentActivity
+        SessionRequest.create(context, activityContext, false) { sessionResponse ->
             if (sessionResponse == null) {
                 DebugUtils.error("Openreplay: no response from /start request")
                 return@create
@@ -284,7 +287,8 @@ object OpenReplay {
             return
         }
         
-        SessionRequest.create(context = context, doNotRecord = false) { sessionResponse ->
+        val activityContext = lifecycleManager?.currentActivity
+        SessionRequest.create(context = context, activityContext = activityContext, doNotRecord = false) { sessionResponse ->
             if (sessionResponse != null) {
                 MessageCollector.syncBuffers()
                 MessageCollector.start(context)

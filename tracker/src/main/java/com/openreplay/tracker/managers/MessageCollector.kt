@@ -312,7 +312,9 @@ object MessageCollector {
     }
 
     fun cycleBuffer() {
-        OpenReplay.sessionStartTs = System.currentTimeMillis()
+        if (OpenReplay.sessionStartTs == 0L) {
+            OpenReplay.sessionStartTs = System.currentTimeMillis()
+        }
 
         if (OpenReplay.bufferingMode) {
             synchronized(messagesWaiting) {

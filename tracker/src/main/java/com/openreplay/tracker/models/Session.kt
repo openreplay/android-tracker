@@ -24,7 +24,7 @@ object SessionRequest {
     private const val RETRY_DELAY_MS = 5000L
     private const val MAX_RETRIES = 5
 
-    fun create(context: Context, doNotRecord: Boolean, completion: (SessionResponse?) -> Unit) {
+    fun create(context: Context, activityContext: Context?, doNotRecord: Boolean, completion: (SessionResponse?) -> Unit) {
         cachedSessionResponse.get()?.let {
             if (OpenReplay.options.debugLogs) {
                 DebugUtils.log("Returning cached session: ${it.sessionID}")
@@ -41,7 +41,7 @@ object SessionRequest {
         }
 
         try {
-            initializeParams(context, doNotRecord, projectKey)
+            initializeParams(context, activityContext, doNotRecord, projectKey)
             callAPI(completion)
         } catch (e: Exception) {
             DebugUtils.error("Error creating session", e)
@@ -60,8 +60,8 @@ object SessionRequest {
         retryHandler = null
     }
 
-    private fun initializeParams(context: Context, doNotRecord: Boolean, projectKey: String) {
-        val resolution = getDeviceResolution(context)
+    private fun initializeParams(context: Context, activityContext: Context?, doNotRecord: Boolean, projectKey: String) {
+        val resolution = getDeviceResolution(activityContext ?: context)
         val deviceModel = Build.DEVICE ?: "Unknown"
         val deviceType = if (isTablet(context)) "tablet" else "mobile"
         val timestamp = Date().time
@@ -87,6 +87,14 @@ object SessionRequest {
 
     private fun getDeviceResolution(context: Context): Pair<Int, Int> {
         return try {
+            if (context !is android.app.Activity && context !is android.view.ContextThemeWrapper) {
+                if (OpenReplay.options.debugLogs) {
+                    DebugUtils.log("Non-visual context provided for resolution, using display metrics")
+                }
+                val metrics = context.resources.displayMetrics
+                return Pair(metrics.widthPixels, metrics.heightPixels)
+            }
+            
             val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
             if (windowManager == null) {
                 DebugUtils.error("WindowManager is null, using default resolution")
@@ -104,7 +112,8 @@ object SessionRequest {
             }
         } catch (e: Exception) {
             DebugUtils.error("Error getting device resolution", e)
-            Pair(1080, 1920)
+            val metrics = context.resources.displayMetrics
+            Pair(metrics.widthPixels, metrics.heightPixels)
         }
     }
 

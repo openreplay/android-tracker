@@ -25,6 +25,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
@@ -137,25 +138,21 @@ object ScreenshotManager {
     }
 
     private suspend fun makeScreenshotAndSaveWithArchive(chunk: Int = 10) {
-        // compress add screen shot to storage and archive
-        // create picture
         coroutineScope {
             try {
-                // DebugUtils.log("make screenshot")
                 val screenShotBitmap = withContext(Dispatchers.Main) { captureScreenshot() }
-                // get or create folder
                 val screenShotFolder = getScreenshotFolder()
                 val screenShotFile = File(screenShotFolder, "${System.currentTimeMillis()}.jpeg")
-                // DebugUtils.log("save screenshot")
-                // save screen shot
                 FileOutputStream(screenShotFile).use { out -> out.write(compress(screenShotBitmap)) }
-                // make archive for $chunk pictures
-                //  for example archivate folder for 10 pictures minimum
                 if (screenShotFolder.listFiles().orEmpty().size >= chunk) {
                     archivateFolder(folder = screenShotFolder)
                 }
+            } catch (e: IllegalStateException) {
+                if (OpenReplay.options.debugLogs) {
+                    DebugUtils.log("Screenshot skipped: ${e.message}")
+                }
             } catch (e: Exception) {
-                DebugUtils.error(e)
+                DebugUtils.error("Screenshot error: ${e.message}")
             }
         }
     }
@@ -223,12 +220,24 @@ object ScreenshotManager {
     private suspend fun captureScreenshot(): Bitmap {
         val activity = OpenReplay.getCurrentActivity()
         if (activity == null) {
-            DebugUtils.error("No Activity available for screenshot. Make sure OpenReplay.start() was called with an Activity context.")
             throw IllegalStateException("No Activity available for screenshot")
         }
+        
+        if (activity.isFinishing || activity.isDestroyed) {
+            throw IllegalStateException("Activity is finishing or destroyed")
+        }
+        
         return suspendCoroutine { coroutine ->
-            activity.screenShot { shot ->
-                coroutine.resumeWith(Result.success(shot))
+            try {
+                activity.screenShot { shot ->
+                    if (!coroutine.context.isActive) {
+                        shot.recycle()
+                        return@screenShot
+                    }
+                    coroutine.resumeWith(Result.success(shot))
+                }
+            } catch (e: Exception) {
+                coroutine.resumeWith(Result.failure(e))
             }
         }
     }
@@ -428,20 +437,32 @@ object ScreenshotManager {
 
     private fun Activity.screenShot(result: (Bitmap) -> Unit) {
         val activity = this
-        val view = window.decorView.rootView
+        
+        if (activity.isFinishing || activity.isDestroyed) {
+            if (OpenReplay.options.debugLogs) {
+                DebugUtils.log("Activity is finishing or destroyed, skipping screenshot")
+            }
+            return
+        }
+        
+        val view = window?.decorView?.rootView
+        if (view == null || view.width <= 0 || view.height <= 0) {
+            if (OpenReplay.options.debugLogs) {
+                DebugUtils.error("Invalid view for screenshot")
+            }
+            return
+        }
+        
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // New version of Android, should use PixelCopy
             val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
             val location = IntArray(2)
             view.getLocationInWindow(location)
 
-
-            if (!activity.isFinishing) {
-                // Reuse handler to avoid creating new ones
-                if (mainHandler == null) {
-                    mainHandler = Handler(mainLooper)
-                }
-                
+            if (mainHandler == null) {
+                mainHandler = Handler(mainLooper)
+            }
+            
+            try {
                 PixelCopy.request(
                     activity.window,
                     Rect(
@@ -451,6 +472,11 @@ object ScreenshotManager {
                         location[1] + view.height
                     ),
                     bitmap, { copyResult ->
+                        if (activity.isFinishing || activity.isDestroyed) {
+                            bitmap.recycle()
+                            return@request
+                        }
+                        
                         when (copyResult) {
                             PixelCopy.SUCCESS -> {
                                 result(bitmap)
@@ -459,22 +485,27 @@ object ScreenshotManager {
                                 if (OpenReplay.options.debugLogs) {
                                     DebugUtils.error("PixelCopy failed with result: $copyResult, falling back to oldViewToBitmap")
                                 }
-                                // Fallback to old method
-                                result(oldViewToBitmap(view))
+                                bitmap.recycle()
+                                try {
+                                    result(oldViewToBitmap(view))
+                                } catch (e: Exception) {
+                                    DebugUtils.error("Fallback screenshot failed: ${e.message}")
+                                }
                             }
                         }
                     },
                     mainHandler!!
                 )
-            } else {
-                if (OpenReplay.options.debugLogs) {
-                    DebugUtils.log("Activity is finishing, using oldViewToBitmap method")
-                }
-                result(oldViewToBitmap(view))
+            } catch (e: Exception) {
+                DebugUtils.error("PixelCopy request failed: ${e.message}")
+                bitmap.recycle()
             }
         } else {
-            // Old version can keep using view.draw
-            result(oldViewToBitmap(view))
+            try {
+                result(oldViewToBitmap(view))
+            } catch (e: Exception) {
+                DebugUtils.error("Screenshot failed: ${e.message}")
+            }
         }
     }
 
