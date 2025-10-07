@@ -5,7 +5,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.res.Configuration
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
@@ -37,7 +36,6 @@ class PerformanceListener private constructor(applicationContext: Context) :
 
     private val appContext = applicationContext
     private var batteryLevelReceiver: BroadcastReceiver? = null
-    private var orientationReceiver: BroadcastReceiver? = null
     private val cpuHandler = Handler(Looper.getMainLooper())
     private val memoryHandler = Handler(Looper.getMainLooper())
     private val performanceHandler = Handler(Looper.getMainLooper())
@@ -51,7 +49,6 @@ class PerformanceListener private constructor(applicationContext: Context) :
     private var memoryRunnable: Runnable? = null
     private var performanceRunnable: Runnable? = null
     
-    private var lastOrientation: Int = -1
     private var frameCount = 0
     private var lastFrameTime = System.nanoTime()
     private val frameCallback = object : Choreographer.FrameCallback {
@@ -92,7 +89,6 @@ class PerformanceListener private constructor(applicationContext: Context) :
         }
         
         registerBatteryLevelReceiver()
-        registerOrientationReceiver()
         scheduleCpuUsageTask()
         scheduleMemoryUsageTask()
         schedulePerformanceMetricsTask()
@@ -260,14 +256,8 @@ class PerformanceListener private constructor(applicationContext: Context) :
                 ORMobilePerformanceEvent(name = "activeProcessorCount", value = processorCount.toULong())
             )
 
-            val orientation = getOrientation()
-            lastOrientation = orientation
-            MessageCollector.sendMessage(
-                ORMobilePerformanceEvent(name = "orientation", value = orientation.toULong())
-            )
-
             if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("Physical Memory: ${physicalMemory / 1048576L} MB, Processors: $processorCount, Orientation: $orientation")
+                DebugUtils.log("Physical Memory: ${physicalMemory / 1048576L} MB, Processors: $processorCount")
             }
         } catch (e: Exception) {
             DebugUtils.error("Error reporting system info: ${e.message}")
@@ -327,18 +317,6 @@ class PerformanceListener private constructor(applicationContext: Context) :
         }
     }
 
-    private fun getOrientation(): Int {
-        return try {
-            when (appContext.resources.configuration.orientation) {
-                Configuration.ORIENTATION_PORTRAIT -> 1
-                Configuration.ORIENTATION_LANDSCAPE -> 3
-                else -> 0
-            }
-        } catch (e: Exception) {
-            DebugUtils.error("Error getting orientation: ${e.message}")
-            0
-        }
-    }
 
     @Synchronized
     fun stop() {
@@ -363,7 +341,6 @@ class PerformanceListener private constructor(applicationContext: Context) :
         }
         
         unregisterBatteryLevelReceiver()
-        unregisterOrientationReceiver()
         
         cpuRunnable = null
         memoryRunnable = null
@@ -391,54 +368,6 @@ class PerformanceListener private constructor(applicationContext: Context) :
                 DebugUtils.error("Error unregistering battery receiver: ${e.message}")
             } finally {
                 batteryLevelReceiver = null
-            }
-        }
-    }
-
-    private fun registerOrientationReceiver() {
-        unregisterOrientationReceiver()
-        
-        orientationReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) {
-                val currentOrientation = getOrientation()
-                if (currentOrientation != lastOrientation) {
-                    lastOrientation = currentOrientation
-                    MessageCollector.sendMessage(
-                        ORMobilePerformanceEvent(name = "orientation", value = currentOrientation.toULong())
-                    )
-                    if (OpenReplay.options.debugLogs) {
-                        DebugUtils.log("Orientation changed to: $currentOrientation")
-                    }
-                }
-            }
-        }
-        
-        try {
-            appContext.registerReceiver(
-                orientationReceiver,
-                IntentFilter(Intent.ACTION_CONFIGURATION_CHANGED)
-            )
-        } catch (e: Exception) {
-            DebugUtils.error("Error registering orientation receiver: ${e.message}")
-            orientationReceiver = null
-        }
-    }
-
-    private fun unregisterOrientationReceiver() {
-        orientationReceiver?.let { receiver ->
-            try {
-                appContext.unregisterReceiver(receiver)
-                if (OpenReplay.options.debugLogs) {
-                    DebugUtils.log("Orientation receiver unregistered")
-                }
-            } catch (e: IllegalArgumentException) {
-                if (OpenReplay.options.debugLogs) {
-                    DebugUtils.log("Orientation receiver was not registered or already unregistered")
-                }
-            } catch (e: Exception) {
-                DebugUtils.error("Error unregistering orientation receiver: ${e.message}")
-            } finally {
-                orientationReceiver = null
             }
         }
     }

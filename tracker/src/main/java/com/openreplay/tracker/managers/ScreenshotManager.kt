@@ -2,6 +2,7 @@ package com.openreplay.tracker.managers
 
 import android.app.Activity
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapShader
 import android.graphics.Canvas
@@ -18,6 +19,7 @@ import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import com.openreplay.tracker.OpenReplay
 import com.openreplay.tracker.SanitizableViewGroup
+import com.openreplay.tracker.models.script.ORMobilePerformanceEvent
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -46,6 +48,7 @@ object ScreenshotManager {
     private var minResolution: Int = 320
     private lateinit var uiContext: WeakReference<Context>
     private var mainHandler: Handler? = null
+    private var lastOrientation: Int = -1
 
     private var screenShotJob: Job? = null
     private val scope = CoroutineScope(SupervisorJob()
@@ -63,11 +66,12 @@ object ScreenshotManager {
     fun start(context: Context, startTs: Long) {
         uiContext = WeakReference(context)
         firstTs = startTs.toString()
+        lastOrientation = -1
         val intervalMillis =
             OpenReplay.options.screenshotFrequency.millis / OpenReplay.options.fps.toLong()
 
-        // endless job to perform screen shot managing
         screenShotJob = scope.launch {
+            checkAndReportOrientationChange()
             while (true) {
                 delay(intervalMillis)
                 launch { makeScreenshotAndSaveWithArchive() }
@@ -80,12 +84,11 @@ object ScreenshotManager {
     fun stop() {
         screenShotJob?.cancel()
         terminate()
-        // Clear references to prevent memory leaks
         synchronized(sanitizedElements) {
             sanitizedElements.clear()
         }
-        // Clean up handler
         mainHandler = null
+        lastOrientation = -1
     }
 
     @Synchronized
@@ -140,6 +143,7 @@ object ScreenshotManager {
     private suspend fun makeScreenshotAndSaveWithArchive(chunk: Int = 10) {
         coroutineScope {
             try {
+                checkAndReportOrientationChange()
                 val screenShotBitmap = withContext(Dispatchers.Main) { captureScreenshot() }
                 val screenShotFolder = getScreenshotFolder()
                 val screenShotFile = File(screenShotFolder, "${System.currentTimeMillis()}.jpeg")
@@ -166,6 +170,34 @@ object ScreenshotManager {
             } catch (e: Exception) {
                 DebugUtils.error("Error during termination: ${e.message}")
             }
+        }
+    }
+
+    private fun checkAndReportOrientationChange() {
+        try {
+            val context = uiContext.get() ?: return
+            val currentOrientation = when (context.resources.configuration.orientation) {
+                Configuration.ORIENTATION_PORTRAIT -> 1
+                Configuration.ORIENTATION_LANDSCAPE -> 3
+                else -> 0
+            }
+            
+            if (currentOrientation != lastOrientation) {
+                lastOrientation = currentOrientation
+                MessageCollector.sendMessage(
+                    ORMobilePerformanceEvent(name = "orientation", value = currentOrientation.toULong())
+                )
+                if (OpenReplay.options.debugLogs) {
+                    val orientationName = when (currentOrientation) {
+                        1 -> "Portrait"
+                        3 -> "Landscape"
+                        else -> "Unknown"
+                    }
+                    DebugUtils.log("Orientation changed before screenshot: $orientationName ($currentOrientation)")
+                }
+            }
+        } catch (e: Exception) {
+            DebugUtils.error("Error checking orientation: ${e.message}")
         }
     }
 
@@ -396,17 +428,31 @@ object ScreenshotManager {
     private suspend fun compress(originalBitmap: Bitmap): ByteArray = suspendCoroutine {
         ByteArrayOutputStream().use { outputStream ->
             try {
-                // Validate bitmap dimensions
                 if (originalBitmap.width <= 0 || originalBitmap.height <= 0) {
                     throw IllegalArgumentException("Invalid bitmap dimensions: ${originalBitmap.width}x${originalBitmap.height}")
                 }
                 
-                val aspectRatio = originalBitmap.height.toFloat() / originalBitmap.width.toFloat()
-                val newHeight = (minResolution * aspectRatio).toInt().coerceAtLeast(1)
-                val newWidth = minResolution.coerceAtLeast(1)
+                val originalWidth = originalBitmap.width
+                val originalHeight = originalBitmap.height
+                val aspectRatio = originalWidth.toFloat() / originalHeight.toFloat()
+                
+                val newWidth: Int
+                val newHeight: Int
+                
+                if (originalWidth < originalHeight) {
+                    newWidth = minResolution.coerceAtLeast(1)
+                    newHeight = (newWidth / aspectRatio).toInt().coerceAtLeast(1)
+                } else {
+                    newHeight = minResolution.coerceAtLeast(1)
+                    newWidth = (newHeight * aspectRatio).toInt().coerceAtLeast(1)
+                }
+                
+                if (OpenReplay.options.debugLogs) {
+                    val orientation = if (originalWidth < originalHeight) "Portrait" else "Landscape"
+                    DebugUtils.log("Screenshot scaling: $orientation ${originalWidth}x${originalHeight} -> ${newWidth}x${newHeight}")
+                }
 
                 val updated = if (originalBitmap.width == newWidth && originalBitmap.height == newHeight) {
-                    // No scaling needed
                     originalBitmap
                 } else {
                     Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true)
