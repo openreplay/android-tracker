@@ -228,10 +228,10 @@ object MessageCollector {
             return
         }
         
-        if (!message.isValid()) {
-            DebugUtils.error("Attempted to send invalid message with type 0 or null: ${message::class.simpleName} (messageRaw=${message.messageRaw}, messageType=${message.message})")
-            return
-        }
+        // if (!message.isValid()) {
+        //     DebugUtils.error("Attempted to send invalid message with type 0 or null: ${message::class.simpleName} (messageRaw=${message.messageRaw}, messageType=${message.message})")
+        //     return
+        // }
         
         if (OpenReplay.bufferingMode) {
             ConditionsManager.processMessage(message)?.let { trigger ->
@@ -297,10 +297,10 @@ object MessageCollector {
     }
 
     fun sendDebouncedMessage(message: ORMessage) {
-        if (!message.isValid()) {
-            DebugUtils.error("Attempted to debounce invalid message with type 0 or null: ${message::class.simpleName} (messageRaw=${message.messageRaw}, messageType=${message.message})")
-            return
-        }
+        // if (!message.isValid()) {
+        //     DebugUtils.error("Attempted to debounce invalid message with type 0 or null: ${message::class.simpleName} (messageRaw=${message.messageRaw}, messageType=${message.message})")
+        //     return
+        // }
         
         debounceJob?.cancel(false)
 
