@@ -10,21 +10,31 @@ android {
     defaultConfig {
         applicationId = "com.openreplay.sampleapp"
         minSdk = 24
-        targetSdk = 33
+        targetSdk = 34
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        val orServerUrl = "null"
-        val orProjectKey = "null"
-        buildConfigField("String", "SERVER_URL", "\"$orServerUrl\"")
-        buildConfigField("String", "PROJECT_KEY", "\"$orProjectKey\"")
+        val serverUrl = findProperty("OR_SERVER_URL") as String? 
+            ?: System.getenv("OR_SERVER_URL") 
+            ?: "https://foss.openreplay.com/ingest"
+        val projectKey = findProperty("OR_PROJECT_KEY") as String? 
+            ?: System.getenv("OR_PROJECT_KEY") 
+            ?: ""
+        buildConfigField("String", "OR_SERVER_URL", "\"$serverUrl\"")
+        buildConfigField("String", "OR_PROJECT_KEY", "\"$projectKey\"")
     }
 
     buildTypes {
+        debug {
+            isDebuggable = true
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

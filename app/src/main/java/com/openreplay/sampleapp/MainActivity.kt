@@ -11,7 +11,6 @@ import androidx.navigation.ui.setupWithNavController
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.openreplay.sampleapp.databinding.ActivityMainBinding
 import com.openreplay.tracker.OpenReplay
-import com.openreplay.tracker.analytics.ViewTrackingManager
 import com.openreplay.tracker.listeners.NetworkListener
 import com.openreplay.tracker.models.OROptions
 import java.io.BufferedReader
@@ -19,35 +18,27 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 
-
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
-    private lateinit var viewTrackingManager: ViewTrackingManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-//        val rootView = window.decorView.rootView
-//        viewTrackingManager = ViewTrackingManager(rootView)
+        if (BuildConfig.DEBUG) {
+            StrictMode.setThreadPolicy(
+                StrictMode.ThreadPolicy.Builder()
+                    .detectAll()
+                    .penaltyLog()
+                    .build()
+            )
 
-        // Add the ViewTrackingManager as a lifecycle observer
-//        lifecycle.addObserver(viewTrackingManager)
-
-        StrictMode.setThreadPolicy(
-            StrictMode.ThreadPolicy.Builder()
-                .detectAll() // Detect all potential thread violations
-                .penaltyLog() // Log violations in Logcat
-                .penaltyDeath() // Crash the app on violation (optional for debugging)
-                .build()
-        )
-
-        // Enable StrictMode for VM policies
-        StrictMode.setVmPolicy(
-            StrictMode.VmPolicy.Builder()
-                .detectAll() // Detect all potential VM violations
-                .penaltyLog() // Log violations in Logcat
-                .build()
-        )
+            StrictMode.setVmPolicy(
+                StrictMode.VmPolicy.Builder()
+                    .detectAll()
+                    .penaltyLog()
+                    .build()
+            )
+        }
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -58,8 +49,14 @@ class MainActivity : AppCompatActivity() {
             setOf(R.id.navigation_home, R.id.navigation_dashboard, R.id.navigation_notifications)
         )
         navController.addOnDestinationChangedListener { _, destination, _ ->
-            OpenReplay.event("Event Tab click", destination.label)
-            makeGraphQLRequest()
+            OpenReplay.event(
+                "navigation_tab_changed",
+                mapOf(
+                    "destination" to (destination.label ?: "unknown"),
+                    "destinationId" to destination.id
+                )
+            )
+//            makeGraphQLRequest()
         }
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
@@ -75,78 +72,88 @@ class MainActivity : AppCompatActivity() {
         return super.dispatchTouchEvent(ev)
     }
 
-
     private fun startOpenReplay() {
-        OpenReplay.serverURL = "https://foss.openreplay.com/ingest"
-        OpenReplay.setUserID("Android User" + (0..100).random())
+        OpenReplay.serverURL = BuildConfig.OR_SERVER_URL
+        OpenReplay.setUserID("Android User" + (0..10).random())
 
+        val projectKey = BuildConfig.OR_PROJECT_KEY
+        if (projectKey.isEmpty()) {
+            throw IllegalStateException("OR_PROJECT_KEY not configured. Please set it in local.properties")
+        }
+        
         OpenReplay.start(
             context = this,
-            projectKey = "",
-            options = OROptions(screen = true, logs = true, wifiOnly = false, debugLogs = true),
+            projectKey = projectKey,
+            options = OROptions(analytics = true, screen = true, logs = true, wifiOnly = false, debugLogs = true),
             onStarted = {
-                OpenReplay.event("Test Event", User("John Doe", 25))
+                val sessionId = OpenReplay.getSessionID()
+                OpenReplay.event(
+                    "session_started",
+                    mapOf(
+                        "sessionId" to sessionId,
+                        "platform" to "Android",
+                        "appVersion" to BuildConfig.VERSION_NAME
+                    )
+                )
 
-                val id = OpenReplay.getSessionID()
-                OpenReplay.event("Session ID", id)
-                makeSampleRequest()
+                OpenReplay.event(
+                    "user_profile_loaded",
+                    mapOf(
+                        "name" to "John Doe",
+                        "age" to 25,
+                        "role" to "tester"
+                    )
+                )
+
+//                makeSampleRequest()
             }
         )
     }
 
-    private data class User(val name: String, val age: Int)
-}
+    private fun makeGraphQLRequest() {
+        val variables = mapOf("id" to 1)
 
-fun makeGraphQLRequest() {
-    val query = """
-        query {
-            user {
-                id
-                name
+        val message = mapOf(
+            "operationKind" to "query",
+            "operationName" to "getUserProfile",
+            "variables" to variables,
+            "response" to mapOf(
+                "data" to mapOf(
+                    "user" to mapOf(
+                        "id" to 1,
+                        "name" to "John Doe",
+                        "email" to "john.doe@example.com"
+                    )
+                )
+            ),
+            "duration" to 120
+        )
+
+        OpenReplay.sendMessage("gql", message)
+    }
+
+    private fun makeSampleRequest() {
+        Thread {
+            try {
+                val url = URL("https://jsonplaceholder.typicode.com/posts/1")
+                val connection = url.openConnection() as HttpURLConnection
+                connection.requestMethod = "GET"
+                connection.setRequestProperty("Content-Type", "application/json")
+
+                val networkListener = NetworkListener(connection)
+
+                val reader = BufferedReader(InputStreamReader(connection.inputStream))
+                val response = StringBuilder()
+                var line: String?
+                while (reader.readLine().also { line = it } != null) {
+                    response.append(line)
+                }
+                reader.close()
+
+                networkListener.finish(connection, response.toString().toByteArray())
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-        }
-    """.trimIndent()
-
-    val variables = mapOf("id" to 1)
-
-    val message = mapOf(
-        "operationKind" to "query",
-        "operationName" to "getUser",
-        "variables" to variables,
-        "response" to mapOf("id" to 1, "name" to "John Doe"),
-        "duration" to 100
-    )
-
-
-    val messageString = message.toString()
-    OpenReplay.sendMessage("gql", message)
-}
-
-fun makeSampleRequest() {
-    Thread {
-        try {
-            val url = URL("https://jsonplaceholder.typicode.com/posts/1")
-            val connection = url.openConnection() as HttpURLConnection
-            connection.requestMethod = "GET"
-
-            // Optionally set request headers
-            connection.setRequestProperty("Content-Type", "application/json")
-
-            // Initialize the network listener for this connection
-            val networkListener = NetworkListener(connection)
-
-            val reader = BufferedReader(InputStreamReader(connection.inputStream))
-            val response = StringBuilder()
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                response.append(line)
-            }
-            reader.close()
-
-            // Using the network listener to log the finish event
-            networkListener.finish(connection, response.toString().toByteArray())
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }.start()
+        }.start()
+    }
 }
