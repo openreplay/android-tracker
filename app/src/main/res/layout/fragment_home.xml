@@ -64,7 +64,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="Password Field (Masked)"
-            android:layout_marginBottom="16dp">
+            android:layout_marginBottom="8dp">
 
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/input_password"
@@ -72,6 +72,49 @@
                 android:layout_height="wrap_content"
                 android:inputType="textPassword" />
         </com.google.android.material.textfield.TextInputLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Screenshot Masking Test"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="4dp" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Regular Field (Visible in Screenshots)"
+            android:layout_marginBottom="8dp">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/input_regular"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="This text will appear in screenshots" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Sanitized Field (Masked in Screenshots)"
+            android:layout_marginBottom="8dp">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/input_sanitized"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="This text will be MASKED in screenshots" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <Button
+            android:id="@+id/btn_toggle_sanitize"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Toggle Sanitization (Currently: ON)"
+            android:backgroundTint="#FF9800"
+            android:layout_marginBottom="16dp" />
 
         <Button
             android:id="@+id/btn_network_get"

@@ -96,7 +96,8 @@ object ScreenshotManager {
     fun addSanitizedElement(view: View) {
         sanitizedElements.removeAll { it.get() == null }
         
-        DebugUtils.log("Sanitizing view: $view")
+        val viewInfo = "${view.javaClass.simpleName}(id=${view.id}, bounds=${view.width}x${view.height})"
+        DebugUtils.log("Sanitizing view: $viewInfo - Total sanitized elements: ${sanitizedElements.size + 1}")
         sanitizedElements.add(WeakReference(view))
     }
 
@@ -259,6 +260,55 @@ object ScreenshotManager {
         }
     }
 
+    private fun applyMaskToScreenshot(bitmap: Bitmap, rootView: View): Bitmap {
+        synchronized(sanitizedElements) {
+            sanitizedElements.removeAll { it.get() == null }
+            
+            if (sanitizedElements.isEmpty()) {
+                return bitmap
+            }
+            
+            val mutableBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
+            val canvas = Canvas(mutableBitmap)
+            
+            val rootViewLocation = IntArray(2)
+            rootView.getLocationInWindow(rootViewLocation)
+            
+            var maskedCount = 0
+            sanitizedElements.forEach { weakRef ->
+                val sanitizedView = weakRef.get()
+                if (sanitizedView != null && sanitizedView.visibility == View.VISIBLE && sanitizedView.isAttachedToWindow) {
+                    val location = IntArray(2)
+                    sanitizedView.getLocationInWindow(location)
+                    
+                    val x = location[0] - rootViewLocation[0]
+                    val y = location[1] - rootViewLocation[1]
+                    
+                    canvas.save()
+                    canvas.translate(x.toFloat(), y.toFloat())
+                    canvas.drawRect(
+                        0f,
+                        0f,
+                        sanitizedView.width.toFloat(),
+                        sanitizedView.height.toFloat(),
+                        maskPaint
+                    )
+                    canvas.restore()
+                    maskedCount++
+                }
+            }
+            
+            if (maskedCount > 0) {
+                DebugUtils.log("Applied mask to $maskedCount sanitized element(s)")
+            }
+            
+            if (mutableBitmap != bitmap) {
+                bitmap.recycle()
+            }
+            return mutableBitmap
+        }
+    }
+
     private fun oldViewToBitmap(view: View): Bitmap {
         val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -276,7 +326,6 @@ object ScreenshotManager {
 
         // Draw masks over sanitized elements
         synchronized(sanitizedElements) {
-            // Clean up null references
             sanitizedElements.removeAll { it.get() == null }
             
             sanitizedElements.forEach { weakRef ->
@@ -289,7 +338,6 @@ object ScreenshotManager {
                     val x = location[0] - rootViewLocation[0]
                     val y = location[1] - rootViewLocation[1]
 
-                    // Draw the striped mask over the sanitized view
                     canvas.save()
                     canvas.translate(x.toFloat(), y.toFloat())
                     canvas.drawRect(
@@ -500,7 +548,13 @@ object ScreenshotManager {
                         
                         when (copyResult) {
                             PixelCopy.SUCCESS -> {
-                                result(bitmap)
+                                try {
+                                    val maskedBitmap = applyMaskToScreenshot(bitmap, view)
+                                    result(maskedBitmap)
+                                } catch (e: Exception) {
+                                    DebugUtils.error("Failed to apply mask: ${e.message}")
+                                    result(bitmap)
+                                }
                             }
                             else -> {
                                 DebugUtils.error("PixelCopy failed with result: $copyResult, falling back to oldViewToBitmap")

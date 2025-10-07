@@ -16,7 +16,9 @@ import com.openreplay.tracker.OpenReplay
 import com.openreplay.tracker.listeners.Analytics
 import com.openreplay.tracker.listeners.NetworkListener
 import com.openreplay.tracker.listeners.SwipeDirection
+import com.openreplay.tracker.listeners.sanitize
 import com.openreplay.tracker.managers.MessageCollector
+import com.openreplay.tracker.managers.ScreenshotManager
 import com.openreplay.tracker.models.script.ORMobileViewComponentEvent
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -31,6 +33,7 @@ class HomeFragment : Fragment() {
     private var _binding: FragmentHomeBinding? = null
     private val binding get() = _binding!!
     private val homeViewModel by lazy { ViewModelProvider(this)[HomeViewModel::class.java] }
+    private var isSanitized = true
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -73,6 +76,9 @@ class HomeFragment : Fragment() {
                 )
             }
         })
+
+        binding.inputSanitized.sanitize()
+        updateStatus("Sanitization applied to 'input_sanitized' field")
     }
 
     private fun setupSwipeDetection() {
@@ -118,6 +124,19 @@ class HomeFragment : Fragment() {
     }
 
     private fun setupButtons() {
+        binding.btnToggleSanitize.setOnClickListener {
+            isSanitized = !isSanitized
+            if (isSanitized) {
+                binding.inputSanitized.sanitize()
+                binding.btnToggleSanitize.text = "Toggle Sanitization (Currently: ON)"
+                updateStatus("Sanitization ENABLED - Field will be masked in screenshots")
+            } else {
+                ScreenshotManager.removeSanitizedElement(binding.inputSanitized)
+                binding.btnToggleSanitize.text = "Toggle Sanitization (Currently: OFF)"
+                updateStatus("Sanitization DISABLED - Field will be visible in screenshots")
+            }
+        }
+
         binding.btnNetworkGet.setOnClickListener {
             updateStatus("Sending GET request...")
             makeNetworkGetRequest()

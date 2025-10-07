@@ -65,11 +65,21 @@ Key dependencies:
 
 The `app` module contains a sample application demonstrating tracker integration:
 
-- Session tracking
-- User events
-- GraphQL request monitoring
-- Network request tracking
-- Touch event recording
+- **Session tracking** - Automatic session recording
+- **User events** - Custom events and metadata
+- **GraphQL monitoring** - Query and mutation tracking
+- **Network tracking** - HTTP request/response capture
+- **Touch events** - Click and swipe gesture recording
+- **Screenshot sanitization** - Mask sensitive UI elements
+- **Analytics events** - All mobile event types covered
+
+### Testing Screenshot Sanitization
+
+The Home tab includes a live demo of screenshot masking:
+
+- **Regular Field**: Visible in screenshots
+- **Sanitized Field**: Masked with cross-stripes in screenshots
+- **Toggle Button**: Switch sanitization on/off to see the difference
 
 ## Publishing
 
