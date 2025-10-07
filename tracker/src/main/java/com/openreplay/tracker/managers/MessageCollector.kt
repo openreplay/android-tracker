@@ -85,7 +85,7 @@ object MessageCollector {
                 executorService.execute {
                     flushMessages()
                 }
-            }, 2, 5, TimeUnit.SECONDS)
+            }, 0, 5, TimeUnit.SECONDS)
         }
     }
 
@@ -123,7 +123,7 @@ object MessageCollector {
             executorService.execute {
                 flushMessages()
             }
-        }, 2, 5, TimeUnit.SECONDS)
+        }, 0, 5, TimeUnit.SECONDS)
         
         if (OpenReplay.bufferingMode) {
             startCycleBuffer()
@@ -311,7 +311,7 @@ object MessageCollector {
                 sendMessage(it)
                 debouncedMessage = null
             }
-        }, 2, TimeUnit.SECONDS)
+        }, 0, TimeUnit.SECONDS)
     }
 
     fun cycleBuffer() {

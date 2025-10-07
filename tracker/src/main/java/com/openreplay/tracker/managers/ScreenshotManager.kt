@@ -72,6 +72,7 @@ object ScreenshotManager {
 
         screenShotJob = scope.launch {
             checkAndReportOrientationChange()
+            launch { makeScreenshotAndSaveWithArchive() }
             while (true) {
                 delay(intervalMillis)
                 launch { makeScreenshotAndSaveWithArchive() }
