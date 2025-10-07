@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.res.Configuration
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
@@ -32,6 +33,98 @@ class PerformanceListener private constructor(applicationContext: Context) :
             instance ?: synchronized(this) {
                 instance ?: PerformanceListener(context.applicationContext).also { instance = it }
             }
+
+        fun getAllPerformanceMetrics(context: Context): Map<String, Long> {
+            val metrics = mutableMapOf<String, Long>()
+            
+            try {
+                val runtime = Runtime.getRuntime()
+                metrics["physicalMemory"] = runtime.maxMemory()
+                metrics["processorCount"] = runtime.availableProcessors().toLong()
+                metrics["activeProcessorCount"] = runtime.availableProcessors().toLong()
+                metrics["systemUptime"] = SystemClock.elapsedRealtime() / 1000
+                
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                    metrics["isLowPowerModeEnabled"] = if (powerManager?.isPowerSaveMode == true) 1L else 0L
+                } else {
+                    metrics["isLowPowerModeEnabled"] = 0L
+                }
+                
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                    val thermalStatus = powerManager?.currentThermalStatus ?: 0
+                    metrics["thermalState"] = when (thermalStatus) {
+                        PowerManager.THERMAL_STATUS_NONE -> 0L
+                        PowerManager.THERMAL_STATUS_LIGHT -> 1L
+                        PowerManager.THERMAL_STATUS_MODERATE, PowerManager.THERMAL_STATUS_SEVERE -> 2L
+                        PowerManager.THERMAL_STATUS_CRITICAL, PowerManager.THERMAL_STATUS_EMERGENCY, PowerManager.THERMAL_STATUS_SHUTDOWN -> 3L
+                        else -> 0L
+                    }
+                } else {
+                    metrics["thermalState"] = 0L
+                }
+                
+                val batteryMetrics = getBatteryMetrics(context)
+                metrics.putAll(batteryMetrics)
+                
+                val orientation = getOrientation(context)
+                metrics["orientation"] = orientation.toLong()
+            } catch (e: Exception) {
+                DebugUtils.error("Error gathering performance metrics", e)
+            }
+            
+            return metrics
+        }
+
+        fun getBatteryMetrics(context: Context): Map<String, Long> {
+            val metrics = mutableMapOf<String, Long>()
+            
+            try {
+                val batteryIntent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                if (batteryIntent != null) {
+                    val level = batteryIntent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+                    val scale = batteryIntent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+                    val status = batteryIntent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+                    
+                    if (scale > 0) {
+                        val batteryPct = (level * 100 / scale.toFloat()).toLong()
+                        metrics["batteryLevel"] = batteryPct
+                    } else {
+                        metrics["batteryLevel"] = 0L
+                    }
+                    
+                    metrics["batteryState"] = when (status) {
+                        BatteryManager.BATTERY_STATUS_CHARGING -> 2L
+                        BatteryManager.BATTERY_STATUS_FULL -> 3L
+                        BatteryManager.BATTERY_STATUS_DISCHARGING, BatteryManager.BATTERY_STATUS_NOT_CHARGING -> 1L
+                        else -> 0L
+                    }
+                } else {
+                    metrics["batteryLevel"] = 0L
+                    metrics["batteryState"] = 0L
+                }
+            } catch (e: Exception) {
+                DebugUtils.error("Error getting battery metrics", e)
+                metrics["batteryLevel"] = 0L
+                metrics["batteryState"] = 0L
+            }
+            
+            return metrics
+        }
+
+        fun getOrientation(context: Context): Int {
+            return try {
+                when (context.resources.configuration.orientation) {
+                    Configuration.ORIENTATION_PORTRAIT -> 1
+                    Configuration.ORIENTATION_LANDSCAPE -> 3
+                    else -> 0
+                }
+            } catch (e: Exception) {
+                DebugUtils.error("Error getting orientation", e)
+                0
+            }
+        }
     }
 
     private val appContext = applicationContext

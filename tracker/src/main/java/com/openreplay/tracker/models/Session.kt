@@ -13,6 +13,7 @@ import kotlin.math.abs
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import com.openreplay.tracker.managers.NetworkManager
+import com.openreplay.tracker.listeners.PerformanceListener
 
 object SessionRequest {
     private val params = mutableMapOf<String, Any>()
@@ -65,6 +66,7 @@ object SessionRequest {
         val deviceModel = Build.DEVICE ?: "Unknown"
         val deviceType = if (isTablet(context)) "tablet" else "mobile"
         val timestamp = Date().time
+        val performances = PerformanceListener.getAllPerformanceMetrics(context)
 
         synchronized(params) {
             params.clear()
@@ -82,6 +84,11 @@ object SessionRequest {
             params["timestamp"] = timestamp
             params["deviceMemory"] = Runtime.getRuntime().maxMemory() / 1024
             params["timezone"] = getTimezone()
+            params["performances"] = performances
+            
+            if (OpenReplay.options.debugLogs) {
+                DebugUtils.log("Session params initialized with performances: $performances")
+            }
         }
     }
 

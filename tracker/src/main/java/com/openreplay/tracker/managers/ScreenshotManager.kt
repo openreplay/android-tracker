@@ -2,7 +2,6 @@ package com.openreplay.tracker.managers
 
 import android.app.Activity
 import android.content.Context
-import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapShader
 import android.graphics.Canvas
@@ -19,6 +18,7 @@ import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import com.openreplay.tracker.OpenReplay
 import com.openreplay.tracker.SanitizableViewGroup
+import com.openreplay.tracker.listeners.PerformanceListener
 import com.openreplay.tracker.models.script.ORMobilePerformanceEvent
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -176,11 +176,7 @@ object ScreenshotManager {
     private fun checkAndReportOrientationChange() {
         try {
             val context = uiContext.get() ?: return
-            val currentOrientation = when (context.resources.configuration.orientation) {
-                Configuration.ORIENTATION_PORTRAIT -> 1
-                Configuration.ORIENTATION_LANDSCAPE -> 3
-                else -> 0
-            }
+            val currentOrientation = PerformanceListener.getOrientation(context)
             
             if (currentOrientation != lastOrientation) {
                 lastOrientation = currentOrientation
@@ -202,7 +198,7 @@ object ScreenshotManager {
     }
 
 
-    private fun archivateFolder(folder: File) {
+    private fun archivateFolder(folder: File) { 
         val screenshots = folder.listFiles().orEmpty().sortedBy { it.lastModified() }
         
         // Skip if no screenshots
