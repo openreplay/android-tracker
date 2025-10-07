@@ -87,4 +87,16 @@ open class ORMessage(
     open fun contentData(): ByteArray {
         throw UnsupportedOperationException("contentData() must be overridden in ${this::class.simpleName}")
     }
+
+    fun isValid(): Boolean {
+        if (messageRaw == 0.toUByte()) {
+            DebugUtils.error("Invalid message: messageRaw is 0 for ${this::class.simpleName}")
+            return false
+        }
+        if (message == null) {
+            DebugUtils.error("Invalid message: message type is null for ${this::class.simpleName} (messageRaw=$messageRaw)")
+            return false
+        }
+        return true
+    }
 }
