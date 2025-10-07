@@ -2,4 +2,5 @@
 <resources>
     <item name="openreplay_tracked" type="id" />
     <item name="openreplay_exclude" type="id" />
+    <item name="openreplay_editor_listener" type="id" />
 </resources>

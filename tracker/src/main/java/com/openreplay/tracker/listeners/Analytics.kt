@@ -288,6 +288,14 @@ fun View.trackViewAppearances(screenName: String, viewName: String) {
 }
 
 fun EditText.trackTextInput(label: String? = null, masked: Boolean = false) {
+    val existingFocusListener = this.onFocusChangeListener
+    val existingEditorListener = this.getTag(R.id.openreplay_editor_listener)
+    
+    if (existingFocusListener != null || existingEditorListener != null) {
+        DebugUtils.log("EditText already has tracking listeners, skipping")
+        return
+    }
+    
     this.setOnFocusChangeListener { view, hasFocus ->
         if (!hasFocus) {
             val sender = view as EditText
@@ -295,7 +303,7 @@ fun EditText.trackTextInput(label: String? = null, masked: Boolean = false) {
         }
     }
 
-    this.setOnEditorActionListener { v, actionId, _ ->
+    val editorActionListener = TextView.OnEditorActionListener { v, actionId, _ ->
         if (actionId == EditorInfo.IME_ACTION_DONE || actionId == EditorInfo.IME_ACTION_NEXT || actionId == EditorInfo.IME_ACTION_SEND) {
             val sender = v as EditText
             textInputFinished(sender, label, masked)
@@ -304,6 +312,9 @@ fun EditText.trackTextInput(label: String? = null, masked: Boolean = false) {
             false
         }
     }
+    
+    this.setOnEditorActionListener(editorActionListener)
+    this.setTag(R.id.openreplay_editor_listener, editorActionListener)
 }
 
 fun textInputFinished(view: EditText, label: String?, masked: Boolean) {
@@ -342,6 +353,13 @@ fun EditText.sanitize() {
 
 fun EditText.excludeFromTracking() {
     this.setTag(R.id.openreplay_exclude, true)
+}
+
+fun EditText.removeTracking() {
+    this.setOnFocusChangeListener(null)
+    this.setOnEditorActionListener(null)
+    this.setTag(R.id.openreplay_tracked, null)
+    this.setTag(R.id.openreplay_editor_listener, null)
 }
 
 class ActivityLifecycleTracker : LifecycleEventObserver {
