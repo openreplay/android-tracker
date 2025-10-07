@@ -56,7 +56,6 @@ class MainActivity : AppCompatActivity() {
                     "destinationId" to destination.id
                 )
             )
-//            makeGraphQLRequest()
         }
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
@@ -73,13 +72,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startOpenReplay() {
-        OpenReplay.serverURL = BuildConfig.OR_SERVER_URL
-        OpenReplay.setUserID("Android User" + (0..10).random())
-
         val projectKey = BuildConfig.OR_PROJECT_KEY
         if (projectKey.isEmpty()) {
-            throw IllegalStateException("OR_PROJECT_KEY not configured. Please set it in local.properties")
+            android.util.Log.w("OpenReplay", "OR_PROJECT_KEY not configured. Tracking disabled. Please set it in local.properties")
+            return
         }
+        
+        OpenReplay.serverURL = BuildConfig.OR_SERVER_URL
+        OpenReplay.setUserID("Android User" + (0..10).random())
         
         OpenReplay.start(
             context = this,
@@ -104,56 +104,7 @@ class MainActivity : AppCompatActivity() {
                         "role" to "tester"
                     )
                 )
-
-//                makeSampleRequest()
             }
         )
-    }
-
-    private fun makeGraphQLRequest() {
-        val variables = mapOf("id" to 1)
-
-        val message = mapOf(
-            "operationKind" to "query",
-            "operationName" to "getUserProfile",
-            "variables" to variables,
-            "response" to mapOf(
-                "data" to mapOf(
-                    "user" to mapOf(
-                        "id" to 1,
-                        "name" to "John Doe",
-                        "email" to "john.doe@example.com"
-                    )
-                )
-            ),
-            "duration" to 120
-        )
-
-        OpenReplay.sendMessage("gql", message)
-    }
-
-    private fun makeSampleRequest() {
-        Thread {
-            try {
-                val url = URL("https://jsonplaceholder.typicode.com/posts/1")
-                val connection = url.openConnection() as HttpURLConnection
-                connection.requestMethod = "GET"
-                connection.setRequestProperty("Content-Type", "application/json")
-
-                val networkListener = NetworkListener(connection)
-
-                val reader = BufferedReader(InputStreamReader(connection.inputStream))
-                val response = StringBuilder()
-                var line: String?
-                while (reader.readLine().also { line = it } != null) {
-                    response.append(line)
-                }
-                reader.close()
-
-                networkListener.finish(connection, response.toString().toByteArray())
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }.start()
     }
 }

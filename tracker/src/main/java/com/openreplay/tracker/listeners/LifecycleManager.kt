@@ -83,7 +83,7 @@ class LifecycleManager(
 
     override fun onActivityPaused(activity: Activity) {
         isChangingConfiguration = activity.isChangingConfigurations
-        if (OpenReplay.options.debugLogs && isChangingConfiguration) {
+        if (isChangingConfiguration) {
             DebugUtils.log("Activity paused due to configuration change: ${activity.localClassName}")
         }
     }

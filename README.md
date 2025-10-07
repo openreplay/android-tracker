@@ -34,7 +34,7 @@ OR_SERVER_URL=https://your-server.com/ingest
 OR_PROJECT_KEY=your-project-key
 ```
 
-⚠️ **Required:** The app will throw an error if `OR_PROJECT_KEY` is not configured. This ensures secure credential management.
+ℹ️ **Note:** If `OR_PROJECT_KEY` is not configured, the app will run normally but tracking will be disabled. A warning will be logged to help developers identify the missing configuration.
 
 ### Build Configuration
 

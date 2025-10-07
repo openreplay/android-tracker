@@ -46,10 +46,10 @@ The build system checks environment variables if `local.properties` values are n
 ### Verification
 
 After setup, the app will:
-- ✅ Start successfully with your keys
-- ❌ Throw an error if keys are missing: `OR_PROJECT_KEY not configured`
+- ✅ Start successfully with your keys and track sessions
+- ⚠️ Run without tracking if keys are missing (logs warning: `OR_PROJECT_KEY not configured. Tracking disabled.`)
 
-This ensures you never accidentally run with invalid or test credentials.
+This allows the app to run normally during development while reminding you to configure credentials when you're ready to enable tracking.
 
 ## Default Configuration
 

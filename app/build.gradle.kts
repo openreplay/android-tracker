@@ -1,6 +1,21 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.jetbrainsKotlinAndroid)
+}
+
+fun getLocalProperty(key: String, defaultValue: String = ""): String {
+    val properties = Properties()
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        properties.load(FileInputStream(localPropertiesFile))
+    }
+    return properties.getProperty(key) 
+        ?: findProperty(key) as String? 
+        ?: System.getenv(key) 
+        ?: defaultValue
 }
 
 android {
@@ -16,12 +31,9 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        val serverUrl = findProperty("OR_SERVER_URL") as String? 
-            ?: System.getenv("OR_SERVER_URL") 
-            ?: "https://foss.openreplay.com/ingest"
-        val projectKey = findProperty("OR_PROJECT_KEY") as String? 
-            ?: System.getenv("OR_PROJECT_KEY") 
-            ?: ""
+        val serverUrl = getLocalProperty("OR_SERVER_URL", "https://api.openreplay.com/ingest")
+        val projectKey = getLocalProperty("OR_PROJECT_KEY")
+        
         buildConfigField("String", "OR_SERVER_URL", "\"$serverUrl\"")
         buildConfigField("String", "OR_PROJECT_KEY", "\"$projectKey\"")
     }
