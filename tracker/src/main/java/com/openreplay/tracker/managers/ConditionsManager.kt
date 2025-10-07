@@ -1,6 +1,5 @@
 package com.openreplay.tracker.managers
 
-import NetworkManager
 import com.openreplay.tracker.OpenReplay
 import com.openreplay.tracker.models.ORMessage
 import com.openreplay.tracker.models.script.*
@@ -32,6 +31,8 @@ data class Condition(
 
 object ConditionsManager {
     private var mappedConditions: MutableList<Condition> = mutableListOf()
+    private var durationScheduler: ScheduledFuture<*>? = null
+    private val scheduler = Executors.newSingleThreadScheduledExecutor()
 
     fun processMessage(msg: ORMessage): String? {
         val messageType = msg.message ?: return null
@@ -90,7 +91,7 @@ object ConditionsManager {
                 }
 
                 is ORMobileUserID -> {
-                    if (activeCon.op(msg.iD)) {
+                    if (activeCon.op(msg.id)) {
                         return activeCon.name
                     }
                 }
@@ -117,6 +118,12 @@ object ConditionsManager {
         NetworkManager.getConditions() { resp ->
             mapConditions(resp)
         }
+    }
+
+    fun cleanup() {
+        durationScheduler?.cancel(false)
+        scheduler.shutdown()
+        mappedConditions.clear()
     }
 
     private fun mapConditions(resp: List<ApiResponse>) {
@@ -164,15 +171,15 @@ object ConditionsManager {
     }
 
     private fun durationCond(dur: List<String>) {
-        val scheduler = Executors.newSingleThreadScheduledExecutor()
-        var scheduledFuture: ScheduledFuture<*>? = null
+        // Cancel any existing duration scheduler
+        durationScheduler?.cancel(false)
 
-        scheduledFuture = scheduler.scheduleAtFixedRate({
+        durationScheduler = scheduler.scheduleAtFixedRate({
             val now = System.currentTimeMillis()
             val diff = now - OpenReplay.sessionStartTs
             if (dur.any { (it.toLongOrNull() ?: 9999999L) <= diff }) {
 //                OpenReplay.triggerRecording(name)
-                scheduledFuture?.cancel(false) // Cancel the scheduled task after triggering
+                durationScheduler?.cancel(false) // Cancel the scheduled task after triggering
             }
         }, 1, 1, TimeUnit.SECONDS) // Schedule the task to run every second
     }
@@ -182,10 +189,10 @@ object OperatorsManager {
     fun isAnyOp(value: String, target: List<String>): Boolean = true
     fun isOp(value: String, target: List<String>): Boolean = target.contains(value)
     fun isNotOp(value: String, target: List<String>): Boolean = !target.contains(value)
-    fun containsOp(value: String, target: List<String>): Boolean = target.any { it.contains(value) }
-    fun notContainsOp(value: String, target: List<String>): Boolean = !target.any { it.contains(value) }
-    fun startsWithOp(value: String, target: List<String>): Boolean = target.any { it.startsWith(value) }
-    fun endsWithOp(value: String, target: List<String>): Boolean = target.any { it.endsWith(value) }
+    fun containsOp(value: String, target: List<String>): Boolean = target.any { value.contains(it) }
+    fun notContainsOp(value: String, target: List<String>): Boolean = !target.any { value.contains(it) }
+    fun startsWithOp(value: String, target: List<String>): Boolean = target.any { value.startsWith(it) }
+    fun endsWithOp(value: String, target: List<String>): Boolean = target.any { value.endsWith(it) }
     fun greaterThanOp(value: String, target: List<String>): Boolean = target.any {
         (it.toFloatOrNull() ?: 0f) > (value.toFloatOrNull() ?: 0f)
     }

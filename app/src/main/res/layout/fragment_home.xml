@@ -1,22 +1,182 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:fillViewport="true"
     tools:context=".ui.home.HomeFragment">
 
-    <TextView
-        android:id="@+id/text_home"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginStart="8dp"
-        android:layout_marginTop="8dp"
-        android:layout_marginEnd="8dp"
-        android:textAlignment="center"
-        android:textSize="20sp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
-</androidx.constraintlayout.widget.ConstraintLayout>
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Input Tracking Demo"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="All EditText fields are automatically tracked. Password fields are auto-masked."
+            android:textSize="12sp"
+            android:layout_marginBottom="16dp"
+            android:textColor="#666" />
+
+        <FrameLayout
+            android:id="@+id/swipe_area"
+            android:layout_width="match_parent"
+            android:layout_height="120dp"
+            android:background="#E3F2FD"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:id="@+id/text_swipe_hint"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:text="👆 Swipe Here 👆\n⬅️ ➡️ ⬆️ ⬇️"
+                android:textAlignment="center"
+                android:textSize="16sp"
+                android:textColor="#1976D2" />
+        </FrameLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Test Input Field"
+            android:layout_marginBottom="8dp">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/input_test"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Password Field (Masked)"
+            android:layout_marginBottom="8dp">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/input_password"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="textPassword" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Screenshot Masking Test"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="4dp" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Regular Field (Visible in Screenshots)"
+            android:layout_marginBottom="8dp">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/input_regular"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="This text will appear in screenshots" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Sanitized Field (Masked in Screenshots)"
+            android:layout_marginBottom="8dp">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/input_sanitized"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="This text will be MASKED in screenshots" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <Button
+            android:id="@+id/btn_toggle_sanitize"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Toggle Sanitization (Currently: ON)"
+            android:backgroundTint="#FF9800"
+            android:layout_marginBottom="24dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="✨ Gesture Tracking"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="All touch events are automatically captured including taps, swipes, and scrolls."
+            android:textSize="12sp"
+            android:textColor="#666"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🎨 Floating Components"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btn_show_bottomsheet"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="📋 Show Bottom Sheet"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btn_show_dialog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="💬 Show Alert Dialog"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btn_show_custom_dialog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🎨 Show Custom Dialog"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btn_show_snackbar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="📢 Show Snackbar"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:id="@+id/text_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="✅ Tracker Active | Session ID: Initializing..."
+            android:textSize="13sp"
+            android:padding="12dp"
+            android:background="#E8F5E9"
+            android:textColor="#2E7D32"
+            android:layout_marginTop="8dp" />
+
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>

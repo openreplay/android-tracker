@@ -1,8 +1,6 @@
 package com.openreplay.tracker.managers
 
-import NetworkManager
 import android.content.Context
-import android.os.Handler
 import com.openreplay.tracker.OpenReplay
 import com.openreplay.tracker.OpenReplay.getLateMessagesFile
 import com.openreplay.tracker.models.ORMessage
@@ -26,31 +24,40 @@ object MessageCollector {
     private var sendingLastMessages = false
     private val maxMessagesSize = 500_000
     private var lateMessagesFile: File? = null
-    private var sendInterval: Handler? = null
-    private var bufferTimer: Handler? = null
-    private var catchUpTimer: Handler? = null
     private var tick = 0
     private var sendIntervalFuture: ScheduledFuture<*>? = null
-    private val executorService = Executors.newScheduledThreadPool(1)
-    private var debounceTimer: Handler? = null
+    private var executorService = Executors.newScheduledThreadPool(2)
     private var debouncedMessage: ORMessage? = null
-    private val bufferRunnable: Runnable = Runnable {
-        cycleBuffer()
-    }
-
-//    init {
-////        startCycleBuffer()
-////        this.lateMessagesFile = File(context.cacheDir, "lateMessages.dat")
-//    }
+    private var debounceJob: ScheduledFuture<*>? = null
+    private var bufferJob: ScheduledFuture<*>? = null
+    
+    @Volatile
+    private var isPaused = false
+    @Volatile
+    private var isStarted = false
 
     private fun startCycleBuffer() {
-        if (bufferTimer == null) bufferTimer = Handler()
-
-        bufferTimer?.postDelayed(bufferRunnable, 30_000L) // Schedule for 30 seconds
+        bufferJob?.cancel(false)
+        bufferJob = executorService.scheduleWithFixedDelay({
+            cycleBuffer()
+        }, 30, 30, TimeUnit.SECONDS)
     }
 
 
     fun start(context: Context) {
+        if (isStarted && !isPaused) {
+            DebugUtils.log("MessageCollector already started")
+            return
+        }
+        
+        if (isPaused) {
+            resume()
+            return
+        }
+        
+        isStarted = true
+        isPaused = false
+        
         CoroutineScope(Dispatchers.IO).launch {
             // Get the lateMessagesFile in a background thread
             val lateMessagesFile = getLateMessagesFile(context)
@@ -82,16 +89,86 @@ object MessageCollector {
         }
     }
 
-    fun stop() {
-        sendIntervalFuture?.cancel(true)
-        sendInterval?.removeCallbacksAndMessages(null)
-        bufferTimer?.removeCallbacksAndMessages(null)
-        catchUpTimer?.removeCallbacksAndMessages(null)
+    fun pause() {
+        if (!isStarted || isPaused) {
+            DebugUtils.log("MessageCollector not started or already paused")
+            return
+        }
+        
+        isPaused = true
+        
+        // Pause scheduled tasks but don't shutdown executor
+        sendIntervalFuture?.cancel(false)
+        bufferJob?.cancel(false)
+        debounceJob?.cancel(false)
+        
+        // Flush remaining messages before pausing
+        executorService.execute {
+            flushMessages()
+        }
+        
+        DebugUtils.log("MessageCollector paused")
+    }
+    
+    fun resume() {
+        if (!isStarted || !isPaused) {
+            DebugUtils.log("MessageCollector not paused or not started")
+            return
+        }
+        
+        isPaused = false
+        
+        // Restart scheduled tasks
+        sendIntervalFuture = executorService.scheduleWithFixedDelay({
+            executorService.execute {
+                flushMessages()
+            }
+        }, 0, 5, TimeUnit.SECONDS)
+        
+        if (OpenReplay.bufferingMode) {
+            startCycleBuffer()
+        }
+        
+        DebugUtils.log("MessageCollector resumed")
+    }
 
+    fun stop() {
+        if (!isStarted) {
+            return
+        }
+        
+        sendIntervalFuture?.cancel(true)
+        bufferJob?.cancel(true)
+        debounceJob?.cancel(true)
+        
         terminate()
+        
+        // Shutdown and recreate executor for future use
+        executorService.shutdown()
+        try {
+            if (!executorService.awaitTermination(5, TimeUnit.SECONDS)) {
+                executorService.shutdownNow()
+            }
+        } catch (e: InterruptedException) {
+            executorService.shutdownNow()
+            Thread.currentThread().interrupt()
+        }
+        
+        // Recreate executor service for potential restart
+        executorService = Executors.newScheduledThreadPool(2)
+        
+        isStarted = false
+        isPaused = false
+        
+        DebugUtils.log("MessageCollector stopped")
     }
 
     private fun flushMessages() {
+        if (NetworkManager.sessionId == null && !sendingLastMessages) {
+            DebugUtils.log("Session not initialized yet, skipping flush")
+            return
+        }
+        
         val messages = mutableListOf<ByteArray>()
         var sentSize = 0
         while (messagesWaiting.isNotEmpty() && sentSize + messagesWaiting.first().size <= maxMessagesSize) {
@@ -111,11 +188,15 @@ object MessageCollector {
             content.write(message)
         }
 
-        if (sendingLastMessages && lateMessagesFile?.exists() == true) {
-            try {
-                lateMessagesFile?.writeBytes(content.toByteArray())
-            } catch (e: IOException) {
-                e.printStackTrace()
+        if (sendingLastMessages) {
+            lateMessagesFile?.let { file ->
+                if (file.exists()) {
+                    try {
+                        file.writeBytes(content.toByteArray())
+                    } catch (e: IOException) {
+                        DebugUtils.error("Error writing late messages: ${e.message}")
+                    }
+                }
             }
         }
 
@@ -128,48 +209,67 @@ object MessageCollector {
                 messagesWaiting.addAll(0, messages)
             } else if (sendingLastMessages) {
                 sendingLastMessages = false
-                if (lateMessagesFile?.exists() == true) {
-                    lateMessagesFile!!.delete()
+                lateMessagesFile?.let { file ->
+                    if (file.exists()) {
+                        try {
+                            file.delete()
+                        } catch (e: Exception) {
+                            DebugUtils.error("Error deleting late messages file: ${e.message}")
+                        }
+                    }
                 }
             }
         }
     }
 
     fun sendMessage(message: ORMessage) {
+        if (isPaused) {
+            DebugUtils.log("MessageCollector is paused, message dropped")
+            return
+        }
+        
+        if (!message.isValid()) {
+            DebugUtils.error("Attempted to send invalid message with type 0 or null: ${message::class.simpleName} (messageRaw=${message.messageRaw}, messageType=${message.message})")
+            return
+        }
+        
         if (OpenReplay.bufferingMode) {
             ConditionsManager.processMessage(message)?.let { trigger ->
                 OpenReplay.triggerRecording(trigger)
             }
         }
-        if (OpenReplay.options.debugLogs) {
-            if (!message.toString().contains("Log") && !message.toString()
-                    .contains("NetworkCall")
-            ) {
-                DebugUtils.log(message.toString())
-            }
-            (message as? ORMobileNetworkCall)?.let { networkCallMessage ->
-                DebugUtils.log("-->> MobileNetworkCall(105): ${networkCallMessage.method} ${networkCallMessage.URL}")
-            }
+        
+        if (!message.toString().contains("Log") && !message.toString().contains("NetworkCall")) {
+            DebugUtils.log(message.toString())
+        }
+        (message as? ORMobileNetworkCall)?.let { networkCallMessage ->
+            DebugUtils.log("-->> MobileNetworkCall(105): ${networkCallMessage.method} ${networkCallMessage.URL}")
         }
 
         sendRawMessage(data = message.contentData())
     }
 
     fun syncBuffers() {
-        val buf1 = messagesWaiting.size
-        val buf2 = messagesWaitingBackup.size
-        tick = 0
-        bufferTimer?.removeCallbacksAndMessages(null)
-        bufferTimer = null
+        executorService.execute {
+            val buf1 = messagesWaiting.size
+            val buf2 = messagesWaitingBackup.size
+            tick = 0
+            bufferJob?.cancel(false)
+            bufferJob = null
 
-        if (buf1 > buf2) {
-            messagesWaitingBackup.clear()
-        } else {
-            messagesWaiting = ArrayList(messagesWaitingBackup)
-            messagesWaitingBackup.clear()
+            synchronized(messagesWaiting) {
+                synchronized(messagesWaitingBackup) {
+                    if (buf1 > buf2) {
+                        messagesWaitingBackup.clear()
+                    } else {
+                        messagesWaiting = ArrayList(messagesWaitingBackup)
+                        messagesWaitingBackup.clear()
+                    }
+                }
+            }
+
+            flushMessages()
         }
-
-        flushMessages()
     }
 
     private fun sendRawMessage(data: ByteArray) {
@@ -197,35 +297,40 @@ object MessageCollector {
     }
 
     fun sendDebouncedMessage(message: ORMessage) {
-        // Cancel any existing callbacks
-        debounceTimer?.removeCallbacksAndMessages(null)
+        if (!message.isValid()) {
+            DebugUtils.error("Attempted to debounce invalid message with type 0 or null: ${message::class.simpleName} (messageRaw=${message.messageRaw}, messageType=${message.message})")
+            return
+        }
+        
+        debounceJob?.cancel(false)
 
         debouncedMessage = message
-        // Initialize the handler if it hasn't been already
-        if (debounceTimer == null) debounceTimer = Handler()
 
-        debounceTimer?.postDelayed({
+        debounceJob = executorService.schedule({
             debouncedMessage?.let {
                 sendMessage(it)
                 debouncedMessage = null
             }
-        }, 2000) // 2.0 seconds delay
+        }, 0, TimeUnit.SECONDS)
     }
 
     fun cycleBuffer() {
-        OpenReplay.sessionStartTs = System.currentTimeMillis()
-
-        if (OpenReplay.bufferingMode) {
-            if (tick % 2 == 0) {
-                messagesWaiting.clear()
-            } else {
-                messagesWaitingBackup.clear()
-            }
-            tick += 1
+        if (OpenReplay.sessionStartTs == 0L) {
+            OpenReplay.sessionStartTs = System.currentTimeMillis()
         }
 
-        // Reschedule the runnable for the next cycle
-        bufferTimer?.postDelayed(bufferRunnable, 30_000L)
+        if (OpenReplay.bufferingMode) {
+            synchronized(messagesWaiting) {
+                synchronized(messagesWaitingBackup) {
+                    if (tick % 2 == 0) {
+                        messagesWaiting.clear()
+                    } else {
+                        messagesWaitingBackup.clear()
+                    }
+                    tick += 1
+                }
+            }
+        }
     }
 
     private fun terminate() {

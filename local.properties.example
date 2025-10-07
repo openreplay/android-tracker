@@ -1,0 +1,11 @@
+# Example configuration for OpenReplay Android Tracker
+# Copy this file to 'local.properties' and add your actual credentials
+# Note: local.properties is gitignored and will not be committed
+
+# Android SDK location (usually auto-generated)
+sdk.dir=/path/to/your/android/sdk
+
+# OpenReplay Configuration
+# Replace these values with your actual OpenReplay instance details
+OR_SERVER_URL=https://your-openreplay-instance.com/ingest
+OR_PROJECT_KEY=your_actual_project_key_here

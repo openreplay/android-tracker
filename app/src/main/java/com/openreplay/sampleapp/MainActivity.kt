@@ -1,6 +1,7 @@
 package com.openreplay.sampleapp
 
 import android.os.Bundle
+import android.os.StrictMode
 import android.view.MotionEvent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.navigation.findNavController
@@ -10,14 +11,35 @@ import androidx.navigation.ui.setupWithNavController
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.openreplay.sampleapp.databinding.ActivityMainBinding
 import com.openreplay.tracker.OpenReplay
+import com.openreplay.tracker.listeners.NetworkListener
 import com.openreplay.tracker.models.OROptions
-
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (BuildConfig.DEBUG) {
+            StrictMode.setThreadPolicy(
+                StrictMode.ThreadPolicy.Builder()
+                    .detectAll()
+                    .penaltyLog()
+                    .build()
+            )
+
+            StrictMode.setVmPolicy(
+                StrictMode.VmPolicy.Builder()
+                    .detectAll()
+                    .penaltyLog()
+                    .build()
+            )
+        }
+
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -27,7 +49,13 @@ class MainActivity : AppCompatActivity() {
             setOf(R.id.navigation_home, R.id.navigation_dashboard, R.id.navigation_notifications)
         )
         navController.addOnDestinationChangedListener { _, destination, _ ->
-            OpenReplay.event("Event Tab click", destination.label)
+            OpenReplay.event(
+                "navigation_tab_changed",
+                mapOf(
+                    "destination" to (destination.label ?: "unknown"),
+                    "destinationId" to destination.id
+                )
+            )
         }
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
@@ -38,37 +66,45 @@ class MainActivity : AppCompatActivity() {
         startOpenReplay()
     }
 
-    override fun onStop() {
-        super.onStop()
-        stopOpenReplay()
-    }
-
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
         ev?.let { OpenReplay.onTouchEvent(it) }
         return super.dispatchTouchEvent(ev)
     }
 
-
     private fun startOpenReplay() {
-        OpenReplay.setupGestureDetector(this)
-        // OpenReplay.serverURL = BuildConfig.SERVER_URL
-        OpenReplay.setUserID("TEST")
+        val projectKey = BuildConfig.OR_PROJECT_KEY
+        if (projectKey.isEmpty()) {
+            android.util.Log.w("OpenReplay", "OR_PROJECT_KEY not configured. Tracking disabled. Please set it in local.properties")
+            return
+        }
+        
+        OpenReplay.serverURL = BuildConfig.OR_SERVER_URL
+        OpenReplay.setUserID("Android User" + (0..10).random())
+        
         OpenReplay.start(
             context = this,
-            projectKey = BuildConfig.PROJECT_KEY,
-            options = OROptions(screen = true, logs = true, wifiOnly = false),
+            projectKey = projectKey,
+            options = OROptions(analytics = true, screen = true, logs = true, wifiOnly = false, debugLogs = true),
             onStarted = {
-                OpenReplay.event("Test Event", User("John Doe", 25))
+                val sessionId = OpenReplay.getSessionID()
+                OpenReplay.event(
+                    "session_started",
+                    mapOf(
+                        "sessionId" to sessionId,
+                        "platform" to "Android",
+                        "appVersion" to BuildConfig.VERSION_NAME
+                    )
+                )
 
-                val id = OpenReplay.getSessionID()
-                OpenReplay.event("Session ID", id)
+                OpenReplay.event(
+                    "user_profile_loaded",
+                    mapOf(
+                        "name" to "John Doe",
+                        "age" to 25,
+                        "role" to "tester"
+                    )
+                )
             }
         )
     }
-
-    private fun stopOpenReplay() {
-        OpenReplay.stop()
-    }
-
-    private data class User(val name: String, val age: Int)
 }

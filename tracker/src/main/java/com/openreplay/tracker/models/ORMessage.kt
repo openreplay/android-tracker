@@ -1,9 +1,13 @@
 package com.openreplay.tracker.models
 
+import com.openreplay.tracker.managers.DebugUtils
 import com.openreplay.tracker.models.script.DataReader
 import com.openreplay.tracker.models.script.ORMessageType
 import com.openreplay.tracker.models.script.fromValues
 
+/**
+ * Generic message wrapper for deserializing binary message data.
+ */
 data class GenericMessage(
     val typeRaw: UByte,
     val type: ORMessageType?,
@@ -21,7 +25,7 @@ data class GenericMessage(
 
                 GenericMessage(typeRaw, type, timestamp, body)
             } catch (e: Exception) {
-                // Log the error or handle it as necessary
+                DebugUtils.error("Failed to deserialize GenericMessage", e)
                 null
             }
         }
@@ -51,6 +55,10 @@ data class GenericMessage(
 }
 
 
+/**
+ * Base class for all OpenReplay message types.
+ * Provides timestamp and message type information.
+ */
 open class ORMessage(
     val messageRaw: UByte,
     val message: ORMessageType?,
@@ -59,7 +67,7 @@ open class ORMessage(
     constructor(messageType: ORMessageType) : this(
         messageRaw = messageType.id,
         message = messageType,
-        timestamp = System.currentTimeMillis().toULong() // Conversion to milliseconds since epoch
+        timestamp = System.currentTimeMillis().toULong()
     )
 
     companion object {
@@ -77,6 +85,18 @@ open class ORMessage(
     }
 
     open fun contentData(): ByteArray {
-        throw NotImplementedError("This method should be overridden")
+        throw UnsupportedOperationException("contentData() must be overridden in ${this::class.simpleName}")
+    }
+
+    fun isValid(): Boolean {
+        if (messageRaw == 0.toUByte()) {
+            DebugUtils.error("Invalid message: messageRaw is 0 for ${this::class.simpleName}")
+            return false
+        }
+        if (message == null) {
+            DebugUtils.error("Invalid message: message type is null for ${this::class.simpleName} (messageRaw=$messageRaw)")
+            return false
+        }
+        return true
     }
 }

@@ -1,6 +1,6 @@
 package com.openreplay.tracker
 
-import NetworkManager
+
 import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -30,6 +30,7 @@ import com.openreplay.tracker.listeners.LogsListener
 import com.openreplay.tracker.listeners.ORGestureListener
 import com.openreplay.tracker.listeners.PerformanceListener
 import com.openreplay.tracker.listeners.sendNetworkMessage
+import com.openreplay.tracker.managers.NetworkManager
 import com.openreplay.tracker.managers.ConditionsManager
 import com.openreplay.tracker.managers.DebugUtils
 import com.openreplay.tracker.managers.MessageCollector
@@ -70,22 +71,50 @@ object OpenReplay {
 
     private var appContext: Context? = null
     private var gestureDetector: GestureDetector? = null
+    private var gestureListener: ORGestureListener? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var broadcastReceiver: BroadcastReceiver? = null
+    private var connectivityManager: ConnectivityManager? = null
+    
+    // Reusable Gson instance to avoid creating new instances
+    private val gson by lazy { Gson() }
+    
+    // Session state management
+    @Volatile
+    private var isSessionStarted = false
+    private val sessionLock = Any()
 
 
     fun start(context: Context, projectKey: String, options: OROptions, onStarted: () -> Unit) {
-        NetworkManager.initialize(context)
+        // Use application context to avoid leaks
+        val appContext = context.applicationContext
+        NetworkManager.initialize(appContext)
         CoroutineScope(Dispatchers.IO).launch {
-            UserDefaults.init(context)
+            UserDefaults.init(appContext)
         }
-        this.appContext = context // Use application context to avoid leaks
-        this.options = this.options.merge(options)
+        this.appContext = appContext
+        this.options = options
         this.projectKey = projectKey
 
-        val connectivityManager =
-            context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        // Initialize LifecycleManager immediately to capture current activity
+        if (this.lifecycleManager == null) {
+            this.lifecycleManager = LifecycleManager(appContext, context as? Activity)
+        }
+
+        this.connectivityManager =
+            appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            val networkCallback = object : ConnectivityManager.NetworkCallback() {
+            // Unregister previous callback if exists
+            networkCallback?.let {
+                try {
+                    connectivityManager?.unregisterNetworkCallback(it)
+                } catch (e: Exception) {
+                    // Ignore if not registered
+                }
+            }
+            
+            this.networkCallback = object : ConnectivityManager.NetworkCallback() {
                 override fun onCapabilitiesChanged(
                     network: android.net.Network,
                     capabilities: NetworkCapabilities
@@ -95,19 +124,32 @@ object OpenReplay {
                 }
             }
 
-            connectivityManager.registerDefaultNetworkCallback(networkCallback)
+            val callback = this.networkCallback
+            if (callback != null) {
+                this.connectivityManager?.registerDefaultNetworkCallback(callback)
+            }
         } else {
+            // Unregister previous receiver if exists
+            broadcastReceiver?.let {
+                try {
+                    appContext.unregisterReceiver(it)
+                } catch (e: Exception) {
+                    // Ignore if not registered
+                }
+            }
+            
             // For API levels below 24, listen for connectivity changes using BroadcastReceiver
             val intentFilter = IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION)
-            context.registerReceiver(object : BroadcastReceiver() {
+            this.broadcastReceiver = object : BroadcastReceiver() {
                 override fun onReceive(context: Context?, intent: Intent?) {
-                    val activeNetworkInfo = connectivityManager.activeNetworkInfo
+                    val activeNetworkInfo = connectivityManager?.activeNetworkInfo
                     if (activeNetworkInfo != null && activeNetworkInfo.isConnected) {
                         // Call your method to handle connectivity change
                         startSession(onStarted)
                     }
                 }
-            }, intentFilter)
+            }
+            appContext.registerReceiver(this.broadcastReceiver, intentFilter)
         }
         checkForLateMessages()
     }
@@ -122,58 +164,92 @@ object OpenReplay {
     }
 
     fun startSession(onStarted: () -> Unit) {
-        sessionStartTs = Date().time
-        setupGestureDetector(appContext!!)
-        SessionRequest.create(appContext!!, false) { sessionResponse ->
-            sessionResponse ?: return@create println("Openreplay: no response from /start request")
-
-            if (this.lifecycleManager == null) {
-                this.lifecycleManager = LifecycleManager(appContext!!)
+        synchronized(sessionLock) {
+            if (isSessionStarted) {
+                if (options.debugLogs) {
+                    DebugUtils.log("Session already started, skipping duplicate start")
+                }
+                return
             }
-            MessageCollector.start(appContext!!)
+            
+            val context = appContext
+            if (context == null) {
+                DebugUtils.error("App context is null, cannot start session")
+                return
+            }
+            
+            sessionStartTs = Date().time
+            val activityContext = lifecycleManager?.currentActivity
+            SessionRequest.create(context, activityContext, false) { sessionResponse ->
+                if (sessionResponse == null) {
+                    DebugUtils.error("Openreplay: no response from /start request")
+                    return@create
+                }
 
-            with(options) {
-                if (screen) {
-                    ScreenshotManager.setSettings(
-                        settings = getCaptureSettings(
-                            fps = 1,
-                            quality = options.screenshotQuality
+                MessageCollector.start(context)
+
+                with(options) {
+                    if (screen) {
+                        ScreenshotManager.setSettings(
+                            settings = getCaptureSettings(
+                                fps = 1,
+                                quality = options.screenshotQuality
+                            )
                         )
-                    )
-                    ScreenshotManager.start(appContext!!, sessionStartTs)
+                        ScreenshotManager.start(context, sessionStartTs)
+                    }
+                    if (logs) LogsListener.start()
+                    if (crashes) {
+                        Crash.init(context)
+                        Crash.start()
+                    }
+                    if (performances) PerformanceListener.getInstance(context).start()
+                    if (analytics) Analytics.start()
                 }
-                if (logs) LogsListener.start()
-                if (crashes) {
-                    Crash.init(appContext!!)
-                    Crash.start()
-                }
-                if (performances) PerformanceListener.getInstance(appContext!!).start()
-                if (analytics) Analytics.start()
+                
+                isSessionStarted = true
+                onStarted()
             }
-            onStarted()
         }
     }
 
     fun getLateMessagesFile(context: Context): File {
-        if (lateMessagesFile == null) {
-            lateMessagesFile = File(context.cacheDir, "lateMessages.dat")
+        return lateMessagesFile ?: File(context.cacheDir, "lateMessages.dat").also {
+            lateMessagesFile = it
         }
-        return lateMessagesFile!!
     }
 
     fun coldStart(context: Context, projectKey: String, options: OROptions, onStarted: () -> Unit) {
-        NetworkManager.initialize(context)
-        this.appContext = context // Use application context to avoid leaks
+        // Use application context to avoid leaks
+        val appContext = context.applicationContext
+        NetworkManager.initialize(appContext)
+        this.appContext = appContext
         this.options = options
         this.projectKey = projectKey
         this.bufferingMode = true
+        sessionStartTs = Date().time
 
-        CoroutineScope(Dispatchers.IO).launch {
-            UserDefaults.init(context)
+        // Initialize LifecycleManager immediately to capture current activity
+        if (this.lifecycleManager == null) {
+            this.lifecycleManager = LifecycleManager(appContext, context as? Activity)
         }
 
-        SessionRequest.create(appContext!!, false) { sessionResponse ->
-            sessionResponse ?: return@create println("Openreplay: no response from /start request")
+        CoroutineScope(Dispatchers.IO).launch {
+            UserDefaults.init(appContext)
+        }
+
+        val context = appContext
+        if (context == null) {
+            DebugUtils.error("App context is null, cannot start cold start")
+            return
+        }
+        
+        val activityContext = lifecycleManager?.currentActivity
+        SessionRequest.create(context, activityContext, false) { sessionResponse ->
+            if (sessionResponse == null) {
+                DebugUtils.error("Openreplay: no response from /start request")
+                return@create
+            }
             ConditionsManager.getConditions()
             MessageCollector.cycleBuffer()
             onStarted()
@@ -186,14 +262,14 @@ object OpenReplay {
                             quality = OpenReplay.options.screenshotQuality
                         )
                     )
-                    ScreenshotManager.start(appContext!!, sessionStartTs)
+                    ScreenshotManager.start(context, sessionStartTs)
                 }
                 if (logs) LogsListener.start()
                 if (crashes) {
-                    Crash.init(appContext!!)
+                    Crash.init(context)
                     Crash.start()
                 }
-                if (performances) PerformanceListener.getInstance(appContext!!).start()
+                if (performances) PerformanceListener.getInstance(context).start()
                 if (analytics) Analytics.start()
             }
         }
@@ -204,12 +280,20 @@ object OpenReplay {
         if (options.debugLogs) {
             DebugUtils.log("Triggering recording with condition: $condition")
         }
-        SessionRequest.create(context = appContext!!, doNotRecord = false) { sessionResponse ->
-            sessionResponse?.let {
+        
+        val context = appContext
+        if (context == null) {
+            DebugUtils.error("App context is null, cannot trigger recording")
+            return
+        }
+        
+        val activityContext = lifecycleManager?.currentActivity
+        SessionRequest.create(context = context, activityContext = activityContext, doNotRecord = false) { sessionResponse ->
+            if (sessionResponse != null) {
                 MessageCollector.syncBuffers()
-                MessageCollector.start(appContext!!)
-            } ?: run {
-                println("Openreplay: no response from /start request")
+                MessageCollector.start(context)
+            } else {
+                DebugUtils.error("Openreplay: no response from /start request")
             }
         }
     }
@@ -239,20 +323,147 @@ object OpenReplay {
         }
     }
 
+    /**
+     * Pause the tracker when app goes to background.
+     * This pauses analytics collection but maintains the session.
+     */
+    fun pause() {
+        synchronized(sessionLock) {
+            if (!isSessionStarted) {
+                if (options.debugLogs) {
+                    DebugUtils.log("Cannot pause - session not started")
+                }
+                return
+            }
+            
+            if (options.debugLogs) {
+                DebugUtils.log("Pausing OpenReplay tracker")
+            }
+            
+            // Pause components without destroying them
+            ScreenshotManager.stop()
+            Analytics.stop()
+            LogsListener.stop()
+            appContext?.let {
+                PerformanceListener.getInstance(it).stop()
+            }
+            MessageCollector.pause()
+            
+            // Note: We keep lifecycle manager, network callbacks, and session active
+        }
+    }
+    
+    /**
+     * Resume the tracker when app returns to foreground.
+     * This resumes analytics collection.
+     */
+    fun resume() {
+        synchronized(sessionLock) {
+            if (!isSessionStarted) {
+                // If session was never started, start it now
+                if (options.debugLogs) {
+                    DebugUtils.log("Session not started, starting new session")
+                }
+                startSession(onStarted = {})
+                return
+            }
+            
+            if (options.debugLogs) {
+                DebugUtils.log("Resuming OpenReplay tracker")
+            }
+            
+            val context = appContext
+            if (context == null) {
+                DebugUtils.error("App context is null, cannot resume")
+                return
+            }
+            
+            // Resume message collector
+            MessageCollector.resume()
+            
+            // Restart components
+            with(options) {
+                if (screen) {
+                    ScreenshotManager.setSettings(
+                        settings = getCaptureSettings(
+                            fps = 1,
+                            quality = screenshotQuality
+                        )
+                    )
+                    ScreenshotManager.start(context, sessionStartTs)
+                }
+                if (logs) LogsListener.start()
+                if (performances) {
+                    PerformanceListener.getInstance(context).start()
+                }
+                if (analytics) Analytics.start()
+            }
+        }
+    }
+
     fun stop(closeSession: Boolean = true) {
-        ScreenshotManager.stop()
-        Analytics.stop()
-        LogsListener.stop()
-        PerformanceListener.getInstance(appContext!!).stop()
-        Crash.stop()
-        MessageCollector.stop()
-        if (closeSession) {
-            SessionRequest.clear()
+        synchronized(sessionLock) {
+            ScreenshotManager.stop()
+            Analytics.stop()
+            LogsListener.stop()
+            appContext?.let {
+                PerformanceListener.getInstance(it).stop()
+            }
+            Crash.stop()
+            MessageCollector.stop()
+            ConditionsManager.cleanup()
+            
+            // Clean up gesture listener
+            gestureListener?.cleanup()
+            gestureListener = null
+            
+            // Unregister network callbacks to prevent memory leaks
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                networkCallback?.let {
+                    try {
+                        connectivityManager?.unregisterNetworkCallback(it)
+                    } catch (e: IllegalArgumentException) {
+                        // Already unregistered
+                        if (options.debugLogs) {
+                            DebugUtils.log("Network callback already unregistered")
+                        }
+                    }
+                }
+                networkCallback = null
+            } else {
+                broadcastReceiver?.let {
+                    try {
+                        appContext?.unregisterReceiver(it)
+                    } catch (e: IllegalArgumentException) {
+                        // Receiver was already unregistered
+                        if (options.debugLogs) {
+                            DebugUtils.log("Broadcast receiver already unregistered")
+                        }
+                    }
+                }
+                broadcastReceiver = null
+            }
+            
+            // Unregister lifecycle callbacks
+            lifecycleManager?.unregister()
+            lifecycleManager = null
+            
+            // Clear gesture detector references
+            gestureDetector = null
+            
+            if (closeSession) {
+                SessionRequest.clear()
+            }
+            
+            connectivityManager = null
+            
+            // Reset session state
+            isSessionStarted = false
         }
     }
 
     fun setUserID(userID: String) {
-        val message = ORMobileUserID(iD = userID)
+        val message = ORMobileUserID(id = userID)
         MessageCollector.sendMessage(message)
     }
 
@@ -261,8 +472,8 @@ object OpenReplay {
         MessageCollector.sendMessage(message)
     }
 
-    fun userAnonymousID(iD: String) {
-        val message = ORMobileUserID(iD = iD)
+    fun userAnonymousID(id: String) {
+        val message = ORMobileUserID(id = id)
         MessageCollector.sendMessage(message)
     }
 
@@ -275,7 +486,6 @@ object OpenReplay {
     }
 
     fun event(name: String, `object`: Any?) {
-        val gson = Gson()
         val jsonPayload = `object`?.let { gson.toJson(it) } ?: ""
         eventStr(name, jsonPayload)
     }
@@ -300,67 +510,65 @@ object OpenReplay {
         MessageCollector.sendMessage(message)
     }
 
-//    fun setupGestureDetector(context: Context) {
-//        val rootView = (context as Activity).window.decorView.rootView
-//        val gestureListener = ORGestureListener(rootView)
-//        this.gestureDetector = GestureDetector(context, gestureListener)
-//    }
-
-//    @Composable
-//    fun GestureDetectorBox(onGestureDetected: () -> Unit) {
-//        val context = LocalContext.current
-//        setupGestureDetector(context) {
-//            onGestureDetected()
-//        }
-//
-//        Box(
-//            modifier = Modifier
-//                .fillMaxSize()
-//                .pointerInput(Unit) {
-//                    detectTapGestures(
-//                        onTap = {
-//                            onGestureDetected()
-//                        }
-//                    )
-//                }
-//        ) {
-//            Text(text = "Tap me")
-//        }
-//    }
-
-    fun setupGestureDetector(context: Context) {
-        val activity = context as Activity
+    /**
+     * Setup gesture detector for a specific activity.
+     * This method should be called from LifecycleManager when an activity is resumed.
+     * Using WeakReference pattern through LifecycleManager prevents memory leaks.
+     * 
+     * The gesture detector is triggered via the activity's dispatchTouchEvent() method,
+     * ensuring ALL touch events are captured without interference with normal touch handling.
+     */
+    fun setupGestureDetectorForActivity(activity: Activity) {
         val rootView = activity.window.decorView.rootView
-
-        val gestureListener = ORGestureListener(rootView)
-        val gestureDetector = GestureDetector(context, gestureListener)
-
-        // Set up gesture detection for legacy Android views
-        rootView.setOnTouchListener { v, event ->
-            gestureDetector.onTouchEvent(event)
-        }
-
-        // Handle Jetpack Compose views
-        if (rootView is ViewGroup) {
-            println("jetpack view listener")
-            for (i in 0 until rootView.childCount) {
-                val child = rootView.getChildAt(i)
-                if (child is AbstractComposeView) {
-                    println("child listener")
-                    child.setOnTouchListener { v, event ->
-                        gestureDetector.onTouchEvent(event)
-                    }
-                }
-            }
+        val listener = ORGestureListener(rootView)
+        this.gestureListener = listener
+        this.gestureDetector = GestureDetector(activity, listener)
+        
+        if (options.debugLogs) {
+            DebugUtils.log("Gesture detector setup for activity: ${activity.localClassName}")
         }
     }
 
-    fun onTouchEvent(event: MotionEvent) {
-        this.gestureDetector?.onTouchEvent(event)
+    /**
+     * Process touch events through the gesture detector.
+     * This should be called from the activity's dispatchTouchEvent() method.
+     * 
+     * @param event The MotionEvent to process
+     * @return true if the gesture detector processed the event, false otherwise
+     */
+    fun onTouchEvent(event: MotionEvent): Boolean {
+        val handled = this.gestureDetector?.onTouchEvent(event) ?: false
+        
+        // Optional debug logging for touch events
+        if (options.debugLogs && event.action == MotionEvent.ACTION_DOWN) {
+            DebugUtils.log("Touch event captured at (${event.x}, ${event.y})")
+        }
+        
+        return handled
     }
 
     fun getSessionID(): String {
         return SessionRequest.getSessionId() ?: ""
+    }
+
+    /**
+     * Get the current active activity.
+     * Returns null if no activity is currently active.
+     */
+    fun getCurrentActivity(): Activity? {
+        return lifecycleManager?.currentActivity
+    }
+
+    /**
+     * Check if gesture tracking is properly initialized.
+     * Useful for debugging gesture tracking issues.
+     */
+    fun isGestureTrackingEnabled(): Boolean {
+        val isEnabled = gestureDetector != null && options.analytics
+        if (options.debugLogs) {
+            DebugUtils.log("Gesture tracking enabled: $isEnabled (detector: ${gestureDetector != null}, analytics: ${options.analytics})")
+        }
+        return isEnabled
     }
 }
 
@@ -416,11 +624,9 @@ fun Sanitized(
     AndroidView(
         factory = {
             SanitizableViewGroup(context).apply {
-                // Add a FrameLayout to hold the composable content
                 val frameLayout = FrameLayout(context)
                 addView(frameLayout)
 
-                // Set LayoutParams for the frame layout
                 frameLayout.layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT

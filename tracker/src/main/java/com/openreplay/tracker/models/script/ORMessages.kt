@@ -5,6 +5,51 @@ import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import kotlin.experimental.or
 
+/**
+ * Constants for variable-length integer encoding (VarInt/LEB128)
+ */
+private const val VARINT_CONTINUE_BIT: UByte = 0x80u
+private const val VARINT_VALUE_MASK: UByte = 0x7Fu
+private const val VARINT_SHIFT_BITS = 7
+
+/**
+ * Maximum string length to prevent memory issues (1MB)
+ */
+private const val MAX_STRING_LENGTH = 1_048_576
+
+/**
+ * Log severity levels
+ */
+enum class LogSeverity(val value: String) {
+    VERBOSE("verbose"),
+    DEBUG("debug"),
+    INFO("info"),
+    WARN("warn"),
+    ERROR("error");
+
+    companion object {
+        fun from(value: String): LogSeverity? {
+            return entries.find { it.value.equals(value, ignoreCase = true) }
+        }
+    }
+}
+
+/**
+ * Swipe direction types
+ */
+enum class SwipeDirection(val value: String) {
+    UP("up"),
+    DOWN("down"),
+    LEFT("left"),
+    RIGHT("right");
+
+    companion object {
+        fun from(value: String): SwipeDirection? {
+            return entries.find { it.value.equals(value, ignoreCase = true) }
+        }
+    }
+}
+
 enum class ORMessageType(val id: UByte) {
     MobileMetadata(92u),
     MobileEvent(93u),
@@ -21,53 +66,62 @@ enum class ORMessageType(val id: UByte) {
     MobileNetworkCall(105u),
     MobileSwipeEvent(106u),
     MobileBatchMeta(107u),
-    GraphQL(89u);
+    GraphQL(109u);
 
     companion object {
         fun fromId(id: UByte): ORMessageType? = entries.find { it.id == id }
     }
 }
 
+/**
+ * Reader for deserializing binary message data.
+ * Maintains an internal offset for sequential reading.
+ */
 class DataReader(private val data: ByteArray) {
     private var offset: Int = 0
 
-    @Throws(Exception::class)
+    @Throws(IllegalStateException::class)
     fun readString(): String {
-        // Assuming readData reads the length first and then the actual string bytes.
-        // This implementation needs to be aligned with your specific data format.
-        val length = readInt() // Reads the length of the string first
-        if (offset + length > data.size) throw Exception("Error reading string")
+        val length = readInt()
+        if (offset + length > data.size) {
+            throw IllegalStateException("Cannot read string of length $length at offset $offset (data size: ${data.size})")
+        }
 
         val stringData = data.copyOfRange(offset, offset + length)
         val result = stringData.toString(Charsets.UTF_8)
-        offset += length // Update the offset after reading
+        offset += length
 
         return result
     }
 
-    @Throws(Exception::class)
+    @Throws(IllegalStateException::class)
     private fun readInt(): Int {
-        // This is a simplified example; adjust it according to how integers are encoded in your data.
-        if (offset + 4 > data.size) throw Exception("Invalid offset for Int")
+        if (offset + 4 > data.size) {
+            throw IllegalStateException("Cannot read Int at offset $offset (data size: ${data.size})")
+        }
         val result = ((data[offset].toInt() and 0xFF) shl 24) or
                 ((data[offset + 1].toInt() and 0xFF) shl 16) or
                 ((data[offset + 2].toInt() and 0xFF) shl 8) or
                 (data[offset + 3].toInt() and 0xFF)
-        offset += 4 // Move the offset forward by the size of an Int
+        offset += 4
         return result
     }
 
+    @Throws(IndexOutOfBoundsException::class)
     fun readByte(): UByte {
         if (offset >= data.size) {
-            throw IndexOutOfBoundsException("Offset is out of bounds")
+            throw IndexOutOfBoundsException("Cannot read byte at offset $offset (data size: ${data.size})")
         }
         val result = data[offset].toUByte()
         offset += 1
         return result
     }
 
-
+    @Throws(IllegalStateException::class)
     fun readULong(): ULong {
+        if (offset + 8 > data.size) {
+            throw IllegalStateException("Cannot read ULong at offset $offset (data size: ${data.size})")
+        }
         val result = data.copyOfRange(offset, offset + 8).fold(0uL) { acc, byte ->
             (acc shl 8) or byte.toULong()
         }
@@ -75,23 +129,27 @@ class DataReader(private val data: ByteArray) {
         return result
     }
 
+    @Throws(IllegalStateException::class)
     fun readFloat(): Float {
-        val result = data.copyOfRange(offset, offset + 4).fold(0f) { acc, byte ->
-            (acc * 256) + byte
+        if (offset + 4 > data.size) {
+            throw IllegalStateException("Cannot read Float at offset $offset (data size: ${data.size})")
         }
+        val bytes = data.copyOfRange(offset, offset + 4)
+        val result = ByteBuffer.wrap(bytes).float
         offset += 4
         return result
     }
 
     fun readByteArray(): ByteArray {
-        // Reads the remaining data from the current offset
         val result = data.copyOfRange(offset, data.size)
-        offset = data.size // Update offset to the end of the data
+        offset = data.size
         return result
     }
 
-    // Implement readData here, similar to readString but for generic data reading.
-    // It should update the offset accordingly as well.
+    fun hasMore(): Boolean = offset < data.size
+
+    fun remaining(): Int = data.size - offset
+
     companion object {
         fun fromByteArray(data: ByteArray): DataReader = DataReader(data)
     }
@@ -251,21 +309,35 @@ class ORMobilePerformanceEvent(
     }
 }
 
+/**
+ * Encodes a ULong value using variable-length encoding (VarInt/LEB128).
+ * Uses 7 bits per byte with the MSB as a continuation bit.
+ * More efficient for small numbers: 0-127 uses 1 byte, 128-16383 uses 2 bytes, etc.
+ */
 fun uLongToByteArray(value: ULong): ByteArray {
-    val uLongBytes = ByteArrayOutputStream()
+    val uLongBytes = ByteArrayOutputStream(10) // Max 10 bytes for ULong
     var v = value
-    while (v >= 0x80u) {
-        uLongBytes.write(byteArrayOf((v.toByte() or 0x80.toByte())))
-        v = v shr 7
+    while (v >= VARINT_CONTINUE_BIT) {
+        uLongBytes.write(byteArrayOf((v.toByte() or VARINT_CONTINUE_BIT.toByte())))
+        v = v shr VARINT_SHIFT_BITS
     }
     uLongBytes.write(byteArrayOf(v.toByte()))
     return uLongBytes.toByteArray()
 }
 
+/**
+ * Serializes multiple values into a byte array.
+ * Supports: Array, ULong, UInt, UByte, Byte, Boolean, String, ByteArray, Int, Float, Double
+ * 
+ * String encoding: VarInt length prefix + UTF-8 bytes
+ * Numbers: Fixed-size big-endian encoding
+ * Boolean: 1 byte (0 or 1)
+ */
 fun fromValues(vararg values: Any?): ByteArray {
-    val outputStream = ByteArrayOutputStream()
+    val outputStream = ByteArrayOutputStream(256) // Optimized initial capacity
     values.forEach { value ->
         when (value) {
+            null -> {}
             is Array<*> -> outputStream.write(fromValues(*value))
             is ULong -> outputStream.write(uLongToByteArray(value))
             is UInt -> outputStream.write(uLongToByteArray(value.toULong()))
@@ -274,39 +346,93 @@ fun fromValues(vararg values: Any?): ByteArray {
             is Boolean -> outputStream.write(byteArrayOf(if (value) 1 else 0))
             is String -> {
                 val stringBytes = value.toByteArray(Charsets.UTF_8)
+                require(stringBytes.size <= MAX_STRING_LENGTH) {
+                    "String too long: ${stringBytes.size} bytes (max: $MAX_STRING_LENGTH)"
+                }
                 outputStream.write(uLongToByteArray(stringBytes.size.toULong()))
                 outputStream.write(stringBytes)
             }
-
             is ByteArray -> outputStream.write(value)
-
-            // TODO: review later
             is Int -> outputStream.write(ByteBuffer.allocate(4).putInt(value).array())
             is Float -> outputStream.write(ByteBuffer.allocate(4).putFloat(value).array())
             is Double -> outputStream.write(ByteBuffer.allocate(8).putDouble(value).array())
-
-            // Handle encoding for custom types like UIEdgeInsets, CGRect, CGPoint, CGSize, UIColor
-            else -> throw IllegalArgumentException("Unsupported type: ${value!!::class.java}")
+            else -> throw IllegalArgumentException("Unsupported type: ${value::class.java.simpleName}")
         }
     }
     return outputStream.toByteArray()
 }
 
+/**
+ * Wraps a byte array with its size as a VarInt prefix.
+ * Format: [VarInt size][byte array content]
+ */
 fun withSize(value: ByteArray): ByteArray {
     return fromValues(value.size.toUInt()) + value
 }
 
+/**
+ * Validates that a string is not empty and doesn't exceed max length.
+ * @throws IllegalArgumentException if validation fails
+ */
+internal fun validateString(value: String, fieldName: String, allowEmpty: Boolean = false) {
+    if (!allowEmpty && value.isEmpty()) {
+        throw IllegalArgumentException("$fieldName cannot be empty")
+    }
+    val byteSize = value.toByteArray(Charsets.UTF_8).size
+    require(byteSize <= MAX_STRING_LENGTH) {
+        "$fieldName is too long: $byteSize bytes (max: $MAX_STRING_LENGTH)"
+    }
+}
+
+/**
+ * Validates that coordinates are non-negative.
+ * @throws IllegalArgumentException if validation fails
+ */
+internal fun validateCoordinates(x: Float, y: Float) {
+    require(x >= 0f) { "X coordinate cannot be negative: $x" }
+    require(y >= 0f) { "Y coordinate cannot be negative: $y" }
+    require(x.isFinite()) { "X coordinate must be finite: $x" }
+    require(y.isFinite()) { "Y coordinate must be finite: $y" }
+}
+
+/**
+ * Estimates the serialized size of a message in bytes.
+ * Useful for buffer sizing and optimization.
+ */
+fun estimateMessageSize(vararg values: Any?): Int {
+    var size = 0
+    values.forEach { value ->
+        size += when (value) {
+            null -> 0
+            is ULong -> 10 // Max VarInt size
+            is UInt -> 5 // Max VarInt size for UInt
+            is UByte -> 1
+            is Byte -> 1
+            is Boolean -> 1
+            is String -> {
+                val stringBytes = value.toByteArray(Charsets.UTF_8).size
+                10 + stringBytes // VarInt size + string bytes
+            }
+            is ByteArray -> value.size
+            is Int -> 4
+            is Float -> 4
+            is Double -> 8
+            else -> 0
+        }
+    }
+    return size
+}
 
 class ORMobileUserID(
-    val iD: String,
+    val id: String,
 ) : ORMessage(ORMessageType.MobileUserID) {
 
     override fun contentData(): ByteArray {
-        return this.prefixData() + withSize(fromValues(iD))
+        return this.prefixData() + withSize(fromValues(id))
     }
 
     override fun toString(): String {
-        return "-->> IOSUserID(94): timestamp: $timestamp userID: $iD"
+        return "-->> MobileUserID(94): timestamp: $timestamp userID: $id"
     }
 }
 
@@ -361,6 +487,6 @@ class ORMobileGraphQL(
     }
 
     override fun toString(): String {
-        return "-->> GraphQL(89): timestamp: $timestamp operationKind: $operationKind operationName: $operationName variables: $variables response: $response duration: $duration"
+        return "-->> GraphQL(109): timestamp: $timestamp operationKind: $operationKind operationName: $operationName variables: $variables response: $response duration: $duration"
     }
 }

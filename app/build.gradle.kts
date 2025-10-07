@@ -1,6 +1,21 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.jetbrainsKotlinAndroid)
+}
+
+fun getLocalProperty(key: String, defaultValue: String = ""): String {
+    val properties = Properties()
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        properties.load(FileInputStream(localPropertiesFile))
+    }
+    return properties.getProperty(key) 
+        ?: findProperty(key) as String? 
+        ?: System.getenv(key) 
+        ?: defaultValue
 }
 
 android {
@@ -10,21 +25,28 @@ android {
     defaultConfig {
         applicationId = "com.openreplay.sampleapp"
         minSdk = 24
-        targetSdk = 33
+        targetSdk = 34
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        val orServerUrl = "null"
-        val orProjectKey = "null"
-        buildConfigField("String", "SERVER_URL", "\"$orServerUrl\"")
-        buildConfigField("String", "PROJECT_KEY", "\"$orProjectKey\"")
+        val serverUrl = getLocalProperty("OR_SERVER_URL", "https://api.openreplay.com/ingest")
+        val projectKey = getLocalProperty("OR_PROJECT_KEY")
+        
+        buildConfigField("String", "OR_SERVER_URL", "\"$serverUrl\"")
+        buildConfigField("String", "OR_PROJECT_KEY", "\"$projectKey\"")
     }
 
     buildTypes {
+        debug {
+            isDebuggable = true
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

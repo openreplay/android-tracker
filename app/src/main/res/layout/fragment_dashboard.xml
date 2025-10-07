@@ -1,22 +1,85 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:fillViewport="true"
     tools:context=".ui.dashboard.DashboardFragment">
 
-    <TextView
-        android:id="@+id/text_dashboard"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginStart="8dp"
-        android:layout_marginTop="8dp"
-        android:layout_marginEnd="8dp"
-        android:textAlignment="center"
-        android:textSize="20sp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
-</androidx.constraintlayout.widget.ConstraintLayout>
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🌐 Network Tracking Demo"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="All HTTP requests are automatically captured including headers, body, and response."
+            android:textSize="12sp"
+            android:layout_marginBottom="16dp"
+            android:textColor="#666" />
+
+        <Button
+            android:id="@+id/btn_get_request"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="📥 GET Request"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btn_post_request"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="📤 POST Request"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btn_graphql"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="⚡ GraphQL Query"
+            android:layout_marginBottom="24dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="📊 Response Preview"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/text_response"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Response will appear here..."
+            android:textSize="12sp"
+            android:padding="12dp"
+            android:background="#F5F5F5"
+            android:fontFamily="monospace"
+            android:maxLines="10"
+            android:scrollbars="vertical"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:id="@+id/text_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Ready to send requests"
+            android:textSize="13sp"
+            android:padding="12dp"
+            android:background="#E8F5E9"
+            android:textColor="#2E7D32" />
+
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>

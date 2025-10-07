@@ -1,7 +1,5 @@
 package com.openreplay.tracker.managers
 
-import NetworkManager
-import NetworkManager.sessionId
 import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
@@ -20,14 +18,16 @@ import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import com.openreplay.tracker.OpenReplay
 import com.openreplay.tracker.SanitizableViewGroup
+import com.openreplay.tracker.listeners.PerformanceListener
+import com.openreplay.tracker.models.script.ORMobilePerformanceEvent
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
@@ -38,17 +38,17 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.lang.ref.WeakReference
-import java.util.concurrent.Executors
-import java.util.zip.GZIPOutputStream
 import kotlin.coroutines.suspendCoroutine
 
 object ScreenshotManager {
     private var lastTs: String = ""
     private var firstTs: String = ""
-    private var sanitizedElements: MutableList<View> = mutableListOf()
+    private val sanitizedElements: MutableList<WeakReference<View>> = mutableListOf()
     private var quality: Int = 10
     private var minResolution: Int = 320
     private lateinit var uiContext: WeakReference<Context>
+    private var mainHandler: Handler? = null
+    private var lastOrientation: Int = -1
 
     private var screenShotJob: Job? = null
     private val scope = CoroutineScope(SupervisorJob()
@@ -66,11 +66,13 @@ object ScreenshotManager {
     fun start(context: Context, startTs: Long) {
         uiContext = WeakReference(context)
         firstTs = startTs.toString()
+        lastOrientation = -1
         val intervalMillis =
             OpenReplay.options.screenshotFrequency.millis / OpenReplay.options.fps.toLong()
 
-        // endless job to perform screen shot managing
         screenShotJob = scope.launch {
+            checkAndReportOrientationChange()
+            launch { makeScreenshotAndSaveWithArchive() }
             while (true) {
                 delay(intervalMillis)
                 launch { makeScreenshotAndSaveWithArchive() }
@@ -83,20 +85,27 @@ object ScreenshotManager {
     fun stop() {
         screenShotJob?.cancel()
         terminate()
+        synchronized(sanitizedElements) {
+            sanitizedElements.clear()
+        }
+        mainHandler = null
+        lastOrientation = -1
     }
 
+    @Synchronized
     fun addSanitizedElement(view: View) {
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("Sanitizing view: $view")
-        }
-        sanitizedElements.add(view)
+        sanitizedElements.removeAll { it.get() == null }
+        
+        val viewInfo = "${view.javaClass.simpleName}(id=${view.id}, bounds=${view.width}x${view.height})"
+        DebugUtils.log("Sanitizing view: $viewInfo - Total sanitized elements: ${sanitizedElements.size + 1}")
+        sanitizedElements.add(WeakReference(view))
     }
 
+    @Synchronized
     fun removeSanitizedElement(view: View) {
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("Removing sanitized view: $view")
-        }
-        sanitizedElements.remove(view)
+        DebugUtils.log("Removing sanitized view: $view")
+        // Remove by matching the actual view and clean up null references
+        sanitizedElements.removeAll { it.get() == view || it.get() == null }
     }
 
     private suspend fun sendScreenshotArchives() = withContext(Dispatchers.IO) {
@@ -104,9 +113,15 @@ object ScreenshotManager {
             val archives = getArchiveFolder().listFiles().orEmpty()
             if (archives.isEmpty()) return@withContext
 
+            val projectKey = OpenReplay.projectKey
+            if (projectKey == null) {
+                DebugUtils.error("Project key is null, cannot send screenshot archives")
+                return@withContext
+            }
+            
             archives.forEach { archive ->
                 NetworkManager.sendImages(
-                    projectKey = OpenReplay.projectKey!!,
+                    projectKey = projectKey,
                     images = archive.readBytes(),
                     name = archive.name
                 ) { success ->
@@ -123,25 +138,20 @@ object ScreenshotManager {
     }
 
     private suspend fun makeScreenshotAndSaveWithArchive(chunk: Int = 10) {
-        // compress add screen shot to storage and archive
-        // create picture
         coroutineScope {
             try {
-                // DebugUtils.log("make screenshot")
+                checkAndReportOrientationChange()
                 val screenShotBitmap = withContext(Dispatchers.Main) { captureScreenshot() }
-                // get or create folder
                 val screenShotFolder = getScreenshotFolder()
                 val screenShotFile = File(screenShotFolder, "${System.currentTimeMillis()}.jpeg")
-                // DebugUtils.log("save screenshot")
-                // save screen shot
                 FileOutputStream(screenShotFile).use { out -> out.write(compress(screenShotBitmap)) }
-                // make archive for $chunk pictures
-                //  for example archivate folder for 10 pictures minimum
                 if (screenShotFolder.listFiles().orEmpty().size >= chunk) {
                     archivateFolder(folder = screenShotFolder)
                 }
+            } catch (e: IllegalStateException) {
+                DebugUtils.log("Screenshot skipped: ${e.message}")
             } catch (e: Exception) {
-                DebugUtils.error(e)
+                DebugUtils.error("Screenshot error: ${e.message}")
             }
         }
     }
@@ -158,9 +168,36 @@ object ScreenshotManager {
         }
     }
 
+    private fun checkAndReportOrientationChange() {
+        try {
+            val context = uiContext.get() ?: return
+            val currentOrientation = PerformanceListener.getOrientation(context)
+            
+            if (currentOrientation != lastOrientation) {
+                lastOrientation = currentOrientation
+                MessageCollector.sendMessage(
+                    ORMobilePerformanceEvent(name = "orientation", value = currentOrientation.toULong())
+                )
+                val orientationName = when (currentOrientation) {
+                    1 -> "Portrait"
+                    3 -> "Landscape"
+                    else -> "Unknown"
+                }
+                DebugUtils.log("Orientation changed before screenshot: $orientationName ($currentOrientation)")
+            }
+        } catch (e: Exception) {
+            DebugUtils.error("Error checking orientation: ${e.message}")
+        }
+    }
 
-    private fun archivateFolder(folder: File) {
+
+    private fun archivateFolder(folder: File) { 
         val screenshots = folder.listFiles().orEmpty().sortedBy { it.lastModified() }
+        
+        if (screenshots.isEmpty()) {
+            DebugUtils.log("No screenshots to archive")
+            return
+        }
 
         // combine chunked data to zip
         val combinedData = ByteArrayOutputStream()
@@ -179,6 +216,7 @@ object ScreenshotManager {
             }
         }
         val archiveFolder = getArchiveFolder()
+        val sessionId = NetworkManager.sessionId ?: "unknown"
         val archiveFile = File(archiveFolder, "$sessionId-$lastTs.tar.gz")
         FileOutputStream(archiveFile).use { out -> out.write(combinedData.toByteArray()) }
 
@@ -186,15 +224,6 @@ object ScreenshotManager {
             screenshots.forEach { it.deleteSafely() }
         }
     }
-
-//    private fun getArchiveFolder(): File {
-//        val context = uiContext.get() ?: throw IllegalStateException("No context")
-//        val archiveFolder = File(context.filesDir, "archives")
-//        if (!archiveFolder.exists()) {
-//            archiveFolder.mkdir()
-//        }
-//        return archiveFolder
-//    }
 
     private fun getArchiveFolder(): File {
         val context = uiContext.get() ?: throw IllegalStateException("No context")
@@ -206,22 +235,77 @@ object ScreenshotManager {
         return File(context.filesDir, "screenshots").apply { mkdirs() }
     }
 
-//    private fun getScreenshotFolder(): File {
-//        val context = uiContext.get() ?: throw IllegalStateException("No context")
-//        val screenShotFolder = File(context.filesDir, "screenshots")
-//        if (!screenShotFolder.exists()) {
-//            screenShotFolder.mkdir()
-//        }
-//        return screenShotFolder
-//    }
-
     private suspend fun captureScreenshot(): Bitmap {
-        val activity =
-            uiContext.get() as? Activity ?: throw IllegalStateException("No Activity")
+        val activity = OpenReplay.getCurrentActivity()
+        if (activity == null) {
+            throw IllegalStateException("No Activity available for screenshot")
+        }
+        
+        if (activity.isFinishing || activity.isDestroyed) {
+            throw IllegalStateException("Activity is finishing or destroyed")
+        }
+        
         return suspendCoroutine { coroutine ->
-            activity.screenShot { shot ->
-                coroutine.resumeWith(Result.success(shot))
+            try {
+                activity.screenShot { shot ->
+                    if (!coroutine.context.isActive) {
+                        shot.recycle()
+                        return@screenShot
+                    }
+                    coroutine.resumeWith(Result.success(shot))
+                }
+            } catch (e: Exception) {
+                coroutine.resumeWith(Result.failure(e))
             }
+        }
+    }
+
+    private fun applyMaskToScreenshot(bitmap: Bitmap, rootView: View): Bitmap {
+        synchronized(sanitizedElements) {
+            sanitizedElements.removeAll { it.get() == null }
+            
+            if (sanitizedElements.isEmpty()) {
+                return bitmap
+            }
+            
+            val mutableBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
+            val canvas = Canvas(mutableBitmap)
+            
+            val rootViewLocation = IntArray(2)
+            rootView.getLocationInWindow(rootViewLocation)
+            
+            var maskedCount = 0
+            sanitizedElements.forEach { weakRef ->
+                val sanitizedView = weakRef.get()
+                if (sanitizedView != null && sanitizedView.visibility == View.VISIBLE && sanitizedView.isAttachedToWindow) {
+                    val location = IntArray(2)
+                    sanitizedView.getLocationInWindow(location)
+                    
+                    val x = location[0] - rootViewLocation[0]
+                    val y = location[1] - rootViewLocation[1]
+                    
+                    canvas.save()
+                    canvas.translate(x.toFloat(), y.toFloat())
+                    canvas.drawRect(
+                        0f,
+                        0f,
+                        sanitizedView.width.toFloat(),
+                        sanitizedView.height.toFloat(),
+                        maskPaint
+                    )
+                    canvas.restore()
+                    maskedCount++
+                }
+            }
+            
+            if (maskedCount > 0) {
+                DebugUtils.log("Applied mask to $maskedCount sanitized element(s)")
+            }
+            
+            if (mutableBitmap != bitmap) {
+                bitmap.recycle()
+            }
+            return mutableBitmap
         }
     }
 
@@ -241,26 +325,30 @@ object ScreenshotManager {
         }
 
         // Draw masks over sanitized elements
-        sanitizedElements.forEach { sanitizedView ->
-            if (sanitizedView.visibility == View.VISIBLE && sanitizedView.isAttachedToWindow) {
-                val location = IntArray(2)
-                sanitizedView.getLocationInWindow(location)
-                val rootViewLocation = IntArray(2)
-                view.getLocationInWindow(rootViewLocation)
-                val x = location[0] - rootViewLocation[0]
-                val y = location[1] - rootViewLocation[1]
+        synchronized(sanitizedElements) {
+            sanitizedElements.removeAll { it.get() == null }
+            
+            sanitizedElements.forEach { weakRef ->
+                val sanitizedView = weakRef.get()
+                if (sanitizedView != null && sanitizedView.visibility == View.VISIBLE && sanitizedView.isAttachedToWindow) {
+                    val location = IntArray(2)
+                    sanitizedView.getLocationInWindow(location)
+                    val rootViewLocation = IntArray(2)
+                    view.getLocationInWindow(rootViewLocation)
+                    val x = location[0] - rootViewLocation[0]
+                    val y = location[1] - rootViewLocation[1]
 
-                // Draw the striped mask over the sanitized view
-                canvas.save()
-                canvas.translate(x.toFloat(), y.toFloat())
-                canvas.drawRect(
-                    0f,
-                    0f,
-                    sanitizedView.width.toFloat(),
-                    sanitizedView.height.toFloat(),
-                    maskPaint
-                )
-                canvas.restore()
+                    canvas.save()
+                    canvas.translate(x.toFloat(), y.toFloat())
+                    canvas.drawRect(
+                        0f,
+                        0f,
+                        sanitizedView.width.toFloat(),
+                        sanitizedView.height.toFloat(),
+                        maskPaint
+                    )
+                    canvas.restore()
+                }
             }
         }
 
@@ -268,10 +356,10 @@ object ScreenshotManager {
             if (vv is ViewGroup) {
                 for (i in 0 until vv.childCount) {
                     val child = vv.getChildAt(i)
-                    println("iterateComposeView child: ${child::class.java.name}")
+                    DebugUtils.log("iterateComposeView child: ${child::class.java.name}")
 
                     if (child is SanitizableViewGroup) {
-                        println("SanitizableViewGroup")
+                        DebugUtils.log("SanitizableViewGroup found")
                         val location = IntArray(2)
                         child.getLocationInWindow(location)
                         val rootViewLocation = IntArray(2)
@@ -313,7 +401,10 @@ object ScreenshotManager {
             }
         }
 
-        iterateViewGroup(view as ViewGroup)
+        // Only iterate if it's a ViewGroup
+        if (view is ViewGroup) {
+            iterateViewGroup(view)
+        }
 
         return bitmap
     }
@@ -363,61 +454,128 @@ object ScreenshotManager {
         return patternBitmap
     }
 
-    private fun gzipCompress(data: ByteArray): ByteArray {
-        ByteArrayOutputStream().use { byteArrayOutputStream ->
-            GZIPOutputStream(byteArrayOutputStream).use { gzipOutputStream ->
-                gzipOutputStream.write(data)
-            }
-            return byteArrayOutputStream.toByteArray()
-        }
-    }
-
     private suspend fun compress(originalBitmap: Bitmap): ByteArray = suspendCoroutine {
         ByteArrayOutputStream().use { outputStream ->
-            val aspectRatio = originalBitmap.height.toFloat() / originalBitmap.width.toFloat()
-            val newHeight = (minResolution * aspectRatio).toInt()
+            try {
+                if (originalBitmap.width <= 0 || originalBitmap.height <= 0) {
+                    throw IllegalArgumentException("Invalid bitmap dimensions: ${originalBitmap.width}x${originalBitmap.height}")
+                }
+                
+                val originalWidth = originalBitmap.width
+                val originalHeight = originalBitmap.height
+                val aspectRatio = originalWidth.toFloat() / originalHeight.toFloat()
+                
+                val newWidth: Int
+                val newHeight: Int
+                
+                if (originalWidth < originalHeight) {
+                    newWidth = minResolution.coerceAtLeast(1)
+                    newHeight = (newWidth / aspectRatio).toInt().coerceAtLeast(1)
+                } else {
+                    newHeight = minResolution.coerceAtLeast(1)
+                    newWidth = (newHeight * aspectRatio).toInt().coerceAtLeast(1)
+                }
+                
+                val orientation = if (originalWidth < originalHeight) "Portrait" else "Landscape"
+                DebugUtils.log("Screenshot scaling: $orientation ${originalWidth}x${originalHeight} -> ${newWidth}x${newHeight}")
 
-            val updated =
-                Bitmap.createScaledBitmap(originalBitmap, minResolution, newHeight, true)
+                val updated = if (originalBitmap.width == newWidth && originalBitmap.height == newHeight) {
+                    originalBitmap
+                } else {
+                    Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true)
+                }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                updated.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, quality, outputStream)
-            } else {
-                updated.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        updated.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, quality, outputStream)
+                    } else {
+                        updated.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
+                    }
+                    it.resumeWith(Result.success(outputStream.toByteArray()))
+                } finally {
+                    // Recycle scaled bitmap to free memory (only if different from original)
+                    if (updated != originalBitmap) {
+                        updated.recycle()
+                    }
+                }
+            } catch (e: Exception) {
+                DebugUtils.error("Error compressing bitmap: ${e.message}")
+                it.resumeWith(Result.failure(e))
+            } finally {
+                // Always recycle original bitmap after compression
+                originalBitmap.recycle()
             }
-            it.resumeWith(Result.success(outputStream.toByteArray()))
         }
     }
 
     private fun Activity.screenShot(result: (Bitmap) -> Unit) {
         val activity = this
-        val view = window.decorView.rootView
+        
+        if (activity.isFinishing || activity.isDestroyed) {
+            DebugUtils.log("Activity is finishing or destroyed, skipping screenshot")
+            return
+        }
+        
+        val view = window?.decorView?.rootView
+        if (view == null || view.width <= 0 || view.height <= 0) {
+            DebugUtils.error("Invalid view for screenshot")
+            return
+        }
+        
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // New version of Android, should use PixelCopy
-            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
-            val location = IntArray(2)
-            view.getLocationInWindow(location)
+            val displayMetrics = resources.displayMetrics
+            val bitmap = Bitmap.createBitmap(
+                displayMetrics.widthPixels,
+                displayMetrics.heightPixels,
+                Bitmap.Config.ARGB_8888
+            )
 
-
-            if (!activity.isFinishing)
+            if (mainHandler == null) {
+                mainHandler = Handler(mainLooper)
+            }
+            
+            try {
                 PixelCopy.request(
                     activity.window,
-                    Rect(
-                        location[0],
-                        location[1],
-                        location[0] + view.width,
-                        location[1] + view.height
-                    ),
-                    bitmap, {
-                        if (it == PixelCopy.SUCCESS) {
-                            result(bitmap)
+                    bitmap, { copyResult ->
+                        if (activity.isFinishing || activity.isDestroyed) {
+                            bitmap.recycle()
+                            return@request
+                        }
+                        
+                        when (copyResult) {
+                            PixelCopy.SUCCESS -> {
+                                try {
+                                    val maskedBitmap = applyMaskToScreenshot(bitmap, view)
+                                    result(maskedBitmap)
+                                } catch (e: Exception) {
+                                    DebugUtils.error("Failed to apply mask: ${e.message}")
+                                    result(bitmap)
+                                }
+                            }
+                            else -> {
+                                DebugUtils.error("PixelCopy failed with result: $copyResult, falling back to oldViewToBitmap")
+                                bitmap.recycle()
+                                try {
+                                    result(oldViewToBitmap(view))
+                                } catch (e: Exception) {
+                                    DebugUtils.error("Fallback screenshot failed: ${e.message}")
+                                }
+                            }
                         }
                     },
-                    Handler(mainLooper)
+                    mainHandler!!
                 )
+            } catch (e: Exception) {
+                DebugUtils.error("PixelCopy request failed: ${e.message}")
+                bitmap.recycle()
+            }
         } else {
-            // Old version can keep using view.draw
-            result(oldViewToBitmap(view))
+            try {
+                result(oldViewToBitmap(view))
+            } catch (e: Exception) {
+                DebugUtils.error("Screenshot failed: ${e.message}")
+            }
         }
     }
 
