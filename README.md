@@ -67,18 +67,62 @@ The `app` module contains a sample application demonstrating tracker integration
 
 - **Session tracking** - Automatic session recording
 - **User events** - Custom events and metadata
+- **Input tracking** - Automatic EditText field tracking
 - **GraphQL monitoring** - Query and mutation tracking
 - **Network tracking** - HTTP request/response capture
 - **Touch events** - Click and swipe gesture recording
 - **Screenshot sanitization** - Mask sensitive UI elements
 - **Analytics events** - All mobile event types covered
 
-### Testing Screenshot Sanitization
+### Input Tracking
+
+Input tracking is **automatic** when `analytics = true`. All EditText fields are automatically tracked when an activity is displayed.
+
+**Features:**
+- ✅ **Auto-discovery**: Finds all EditText fields in the view hierarchy
+- ✅ **Smart labeling**: Uses hint text, content description, or view ID
+- ✅ **Password detection**: Automatically masks password input types
+- ✅ **Opt-out support**: Exclude specific fields from tracking
+
+**Automatic Tracking:**
+```kotlin
+// No code needed - EditText fields are automatically tracked!
+// Password fields are automatically masked
+```
+
+**Exclude Specific Fields:**
+```kotlin
+import com.openreplay.tracker.listeners.excludeFromTracking
+
+// Opt-out of tracking for sensitive fields
+binding.internalNotesField.excludeFromTracking()
+```
+
+**Manual Tracking (Optional):**
+```kotlin
+import com.openreplay.tracker.listeners.trackTextInput
+
+// Override auto-tracking with custom settings
+binding.specialField.trackTextInput(label = "custom_label", masked = true)
+```
+
+The tracker captures input when the user:
+- Loses focus from the field
+- Presses Done/Next/Send on the keyboard
+
+### Screenshot Sanitization
 
 The Home tab includes a live demo of screenshot masking:
 
+```kotlin
+import com.openreplay.tracker.listeners.sanitize
+
+// Mask a field in screenshots (visual only)
+binding.creditCardField.sanitize()
+```
+
 - **Regular Field**: Visible in screenshots
-- **Sanitized Field**: Masked with cross-stripes in screenshots
+- **Sanitized Field**: Masked with cross-stripes in screenshots  
 - **Toggle Button**: Switch sanitization on/off to see the difference
 
 ## Publishing

@@ -23,6 +23,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.lifecycle.*
+import com.openreplay.tracker.R
 import com.openreplay.tracker.managers.MessageCollector
 import com.openreplay.tracker.managers.ScreenshotManager
 import com.openreplay.tracker.models.script.*
@@ -306,18 +307,22 @@ fun EditText.trackTextInput(label: String? = null, masked: Boolean = false) {
 }
 
 fun textInputFinished(view: EditText, label: String?, masked: Boolean) {
-    val textToSend =
-        if (view.inputType and InputType.TYPE_TEXT_VARIATION_PASSWORD == InputType.TYPE_TEXT_VARIATION_PASSWORD) {
-            "***"
-        } else {
-            view.text.toString()
-        }
+    val shouldMask = view.isPasswordInputType() || masked
+    val textToSend = if (shouldMask) {
+        "***"
+    } else {
+        view.text?.toString() ?: ""
+    }
+    
+    val finalLabel = label ?: view.hint?.toString() ?: ""
+    
+    DebugUtils.log("Input captured - label: '$finalLabel', value: '$textToSend', masked: $shouldMask")
 
     MessageCollector.sendMessage(
         ORMobileInputEvent(
             value = textToSend,
-            valueMasked = view.isPasswordInputType() || masked,
-            label = label ?: view.hint?.toString() ?: ""
+            valueMasked = shouldMask,
+            label = finalLabel
         )
     )
 }
@@ -333,6 +338,10 @@ fun EditText.isPasswordInputType(): Boolean {
 
 fun EditText.sanitize() {
     ScreenshotManager.addSanitizedElement(this)
+}
+
+fun EditText.excludeFromTracking() {
+    this.setTag(R.id.openreplay_exclude, true)
 }
 
 class ActivityLifecycleTracker : LifecycleEventObserver {

@@ -66,3 +66,94 @@ OROptions(
 ```
 
 Adjust these in `MainActivity.kt` based on your needs.
+
+## Input Tracking
+
+Input tracking is **automatic** when you enable analytics. The tracker automatically discovers and tracks all EditText fields in your app.
+
+### How It Works
+
+When `analytics = true` in OROptions:
+1. The tracker scans the view hierarchy when each activity is displayed
+2. All EditText fields are automatically discovered
+3. Input tracking is set up with smart defaults:
+   - **Label**: Uses hint text → content description → view ID
+   - **Masking**: Automatically enabled for password input types
+   - **Tracking**: Captures on focus loss or keyboard action (Done/Next/Send)
+
+### No Code Required
+
+```kotlin
+// That's it! All EditText fields are now tracked automatically
+// Password fields are automatically masked
+```
+
+### Exclude Specific Fields
+
+```kotlin
+import com.openreplay.tracker.listeners.excludeFromTracking
+
+class MyActivity : AppCompatActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+        
+        // Exclude internal or non-user-facing fields
+        binding.debugField.excludeFromTracking()
+        binding.adminNotesField.excludeFromTracking()
+    }
+}
+```
+
+### Manual Override (Optional)
+
+You can still manually configure specific fields:
+
+```kotlin
+import com.openreplay.tracker.listeners.trackTextInput
+
+// Override auto-tracking with custom settings
+binding.specialField.trackTextInput(
+    label = "custom_field_name",
+    masked = true
+)
+```
+
+### When Input is Captured
+
+The tracker sends an `ORMobileInputEvent` when:
+- User **loses focus** from the field (touches elsewhere)
+- User presses **Done/Next/Send** on the keyboard
+
+### Automatic Password Masking
+
+Password fields are **automatically detected and masked**:
+- `TYPE_TEXT_VARIATION_PASSWORD`
+- `TYPE_TEXT_VARIATION_WEB_PASSWORD`  
+- `TYPE_NUMBER_VARIATION_PASSWORD`
+
+These input types always send "***" instead of the actual value for security.
+
+## Screenshot Sanitization
+
+To prevent sensitive data from appearing in session replay screenshots:
+
+```kotlin
+import com.openreplay.tracker.listeners.sanitize
+
+// Apply cross-stripe mask over this field in screenshots
+binding.creditCardField.sanitize()
+binding.ssnField.sanitize()
+```
+
+**Important:** 
+- `sanitize()` only affects **screenshots** (visual masking)
+- `trackTextInput(masked = true)` only affects **input events** (data masking)
+- For complete privacy, use **both** together:
+
+```kotlin
+binding.creditCardField.apply {
+    trackTextInput(label = "credit_card", masked = true)  // Mask input data
+    sanitize()                                             // Mask in screenshots
+}
+```

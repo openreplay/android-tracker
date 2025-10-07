@@ -4,7 +4,11 @@ import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.os.Bundle
+import android.view.View
+import android.view.ViewGroup
+import android.widget.EditText
 import com.openreplay.tracker.OpenReplay
+import com.openreplay.tracker.R
 import com.openreplay.tracker.managers.DebugUtils
 import java.lang.ref.WeakReference
 
@@ -79,6 +83,59 @@ class LifecycleManager(
     override fun onActivityResumed(activity: Activity) {
         currentActivityRef = WeakReference(activity)
         OpenReplay.setupGestureDetectorForActivity(activity)
+        
+        if (OpenReplay.options.analytics) {
+            activity.window?.decorView?.post {
+                autoTrackInputFields(activity)
+            }
+        }
+    }
+    
+    private fun autoTrackInputFields(activity: Activity) {
+        val rootView = activity.window?.decorView?.rootView
+        if (rootView != null) {
+            val editTexts = findAllEditTexts(rootView)
+            var trackedCount = 0
+            
+            editTexts.forEach { editText ->
+                if (!isAlreadyTracked(editText) && !isExcluded(editText)) {
+                    val label = editText.hint?.toString() 
+                        ?: editText.contentDescription?.toString()
+                        ?: "input_${editText.id}"
+                    
+                    val isSensitive = editText.isPasswordInputType()
+                    editText.trackTextInput(label = label, masked = isSensitive)
+                    editText.setTag(R.id.openreplay_tracked, true)
+                    trackedCount++
+                }
+            }
+            
+            if (trackedCount > 0) {
+                DebugUtils.log("Auto-tracked $trackedCount input field(s) in ${activity.localClassName}")
+            }
+        }
+    }
+    
+    private fun findAllEditTexts(view: View): List<EditText> {
+        val editTexts = mutableListOf<EditText>()
+        
+        if (view is EditText) {
+            editTexts.add(view)
+        } else if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                editTexts.addAll(findAllEditTexts(view.getChildAt(i)))
+            }
+        }
+        
+        return editTexts
+    }
+    
+    private fun isAlreadyTracked(editText: EditText): Boolean {
+        return editText.getTag(R.id.openreplay_tracked) == true
+    }
+    
+    private fun isExcluded(editText: EditText): Boolean {
+        return editText.getTag(R.id.openreplay_exclude) == true
     }
 
     override fun onActivityPaused(activity: Activity) {

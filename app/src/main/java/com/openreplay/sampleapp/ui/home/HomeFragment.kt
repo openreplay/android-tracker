@@ -1,14 +1,10 @@
 package com.openreplay.sampleapp.ui.home
 
 import android.os.Bundle
-import android.text.Editable
-import android.text.TextWatcher
-import android.view.GestureDetector
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import androidx.core.view.GestureDetectorCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import com.openreplay.sampleapp.databinding.FragmentHomeBinding
@@ -53,32 +49,8 @@ class HomeFragment : Fragment() {
     }
 
     private fun setupInputTracking() {
-        binding.inputTest.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                Analytics.sendTextInput(
-                    value = s.toString(),
-                    label = "test_input",
-                    masked = false
-                )
-            }
-        })
-
-        binding.inputPassword.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                Analytics.sendTextInput(
-                    value = "***",
-                    label = "password_input",
-                    masked = true
-                )
-            }
-        })
-
         binding.inputSanitized.sanitize()
-        updateStatus("Sanitization applied to 'input_sanitized' field")
+        updateStatus("Automatic input tracking enabled - All EditText fields are tracked")
     }
 
     private fun setupSwipeDetection() {
