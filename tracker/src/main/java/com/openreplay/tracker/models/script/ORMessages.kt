@@ -66,7 +66,7 @@ enum class ORMessageType(val id: UByte) {
     MobileNetworkCall(105u),
     MobileSwipeEvent(106u),
     MobileBatchMeta(107u),
-    GraphQL(89u);
+    GraphQL(109u);
 
     companion object {
         fun fromId(id: UByte): ORMessageType? = entries.find { it.id == id }
@@ -487,6 +487,6 @@ class ORMobileGraphQL(
     }
 
     override fun toString(): String {
-        return "-->> GraphQL(89): timestamp: $timestamp operationKind: $operationKind operationName: $operationName variables: $variables response: $response duration: $duration"
+        return "-->> GraphQL(109): timestamp: $timestamp operationKind: $operationKind operationName: $operationName variables: $variables response: $response duration: $duration"
     }
 }
