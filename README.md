@@ -125,13 +125,35 @@ binding.creditCardField.sanitize()
 - **Sanitized Field**: Masked with cross-stripes in screenshots  
 - **Toggle Button**: Switch sanitization on/off to see the difference
 
-## Publishing
+### Screenshot Capture Limitations
 
-The tracker library is configured for Maven publishing via JitPack.
+**Known Limitation:** Bottom sheets, dialogs, and floating windows are **not captured** in screenshots.
 
-### Current Version
-Version: 1.1.4
+**Why:** Android's `PixelCopy` API captures only the activity's main window. Dialogs and bottom sheets create separate overlay windows (TYPE_APPLICATION) that exist outside the activity window hierarchy.
 
-```gradle
-implementation("com.github.openreplay:android-tracker:1.1.4")
+**What IS Captured:**
+- ✅ Activity content (main UI)
+- ✅ Fragments within the activity
+- ✅ In-window overlays and popups
+- ✅ Action bar and navigation bar
+
+**What IS NOT Captured:**
+- ❌ AlertDialog windows
+- ❌ BottomSheetDialog windows
+- ❌ Custom Dialog windows
+- ❌ System dialogs (permissions, etc.)
+
+**Workaround - Full Interaction Tracking:**
+
+While dialog visuals aren't captured, all interactions ARE tracked:
+```kotlin
+// Dialog events are tracked
+OpenReplay.event("dialog_opened", mapOf("type" to "login"))
+OpenReplay.event("dialog_submitted", mapOf("action" to "confirm"))
+
+// Input fields in dialogs are auto-tracked
+// Button clicks are tracked
+// All user interactions are logged
 ```
+
+**Result:** You get complete behavioral analytics and interaction data, which is often more valuable than screenshots for understanding user actions.

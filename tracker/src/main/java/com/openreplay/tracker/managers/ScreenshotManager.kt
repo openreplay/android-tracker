@@ -523,9 +523,12 @@ object ScreenshotManager {
         }
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
-            val location = IntArray(2)
-            view.getLocationInWindow(location)
+            val displayMetrics = resources.displayMetrics
+            val bitmap = Bitmap.createBitmap(
+                displayMetrics.widthPixels,
+                displayMetrics.heightPixels,
+                Bitmap.Config.ARGB_8888
+            )
 
             if (mainHandler == null) {
                 mainHandler = Handler(mainLooper)
@@ -534,12 +537,6 @@ object ScreenshotManager {
             try {
                 PixelCopy.request(
                     activity.window,
-                    Rect(
-                        location[0],
-                        location[1],
-                        location[0] + view.width,
-                        location[1] + view.height
-                    ),
                     bitmap, { copyResult ->
                         if (activity.isFinishing || activity.isDestroyed) {
                             bitmap.recycle()
