@@ -1,5 +1,6 @@
 package com.openreplay.sampleapp.ui.home
 
+import android.app.AlertDialog
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -7,21 +8,17 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.google.android.material.snackbar.Snackbar
+import com.openreplay.sampleapp.R
+import com.openreplay.sampleapp.databinding.BottomsheetDemoBinding
+import com.openreplay.sampleapp.databinding.DialogCustomBinding
 import com.openreplay.sampleapp.databinding.FragmentHomeBinding
 import com.openreplay.tracker.OpenReplay
 import com.openreplay.tracker.listeners.Analytics
-import com.openreplay.tracker.listeners.NetworkListener
 import com.openreplay.tracker.listeners.SwipeDirection
 import com.openreplay.tracker.listeners.sanitize
-import com.openreplay.tracker.managers.MessageCollector
 import com.openreplay.tracker.managers.ScreenshotManager
-import com.openreplay.tracker.models.script.ORMobileViewComponentEvent
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.URL
-import org.json.JSONObject
-import kotlin.concurrent.thread
 import kotlin.math.abs
 
 class HomeFragment : Fragment() {
@@ -50,7 +47,9 @@ class HomeFragment : Fragment() {
 
     private fun setupInputTracking() {
         binding.inputSanitized.sanitize()
-        updateStatus("Automatic input tracking enabled - All EditText fields are tracked")
+        
+        val sessionId = OpenReplay.getSessionID()
+        updateStatus("✅ Tracker Active | Session ID: ${sessionId ?: "Initializing..."}")
     }
 
     private fun setupSwipeDetection() {
@@ -62,7 +61,7 @@ class HomeFragment : Fragment() {
                 MotionEvent.ACTION_DOWN -> {
                     startX = event.x
                     startY = event.y
-                    true
+                    false
                 }
                 MotionEvent.ACTION_UP -> {
                     val endX = event.x
@@ -70,7 +69,7 @@ class HomeFragment : Fragment() {
                     val deltaX = endX - startX
                     val deltaY = endY - startY
                     
-                    if (abs(deltaX) > 50 || abs(deltaY) > 50) {
+                    if (abs(deltaX) > 100 || abs(deltaY) > 100) {
                         val direction = when {
                             abs(deltaX) > abs(deltaY) -> {
                                 if (deltaX > 0) SwipeDirection.RIGHT else SwipeDirection.LEFT
@@ -87,8 +86,10 @@ class HomeFragment : Fragment() {
                         view.postDelayed({
                             binding.textSwipeHint.text = "👆 Swipe Here 👆\n⬅️ ➡️ ⬆️ ⬇️"
                         }, 2000)
+                        true
+                    } else {
+                        false
                     }
-                    true
                 }
                 else -> false
             }
@@ -101,221 +102,145 @@ class HomeFragment : Fragment() {
             if (isSanitized) {
                 binding.inputSanitized.sanitize()
                 binding.btnToggleSanitize.text = "Toggle Sanitization (Currently: ON)"
-                updateStatus("Sanitization ENABLED - Field will be masked in screenshots")
+                updateStatus("✅ Sanitization ENABLED - Field masked in screenshots")
             } else {
                 ScreenshotManager.removeSanitizedElement(binding.inputSanitized)
                 binding.btnToggleSanitize.text = "Toggle Sanitization (Currently: OFF)"
-                updateStatus("Sanitization DISABLED - Field will be visible in screenshots")
+                updateStatus("⚠️ Sanitization DISABLED - Field visible in screenshots")
             }
         }
 
-        binding.btnNetworkGet.setOnClickListener {
-            updateStatus("Sending GET request...")
-            makeNetworkGetRequest()
+        binding.btnShowBottomsheet.setOnClickListener {
+            showBottomSheet()
         }
 
-        binding.btnNetworkPost.setOnClickListener {
-            updateStatus("Sending POST request...")
-            makeNetworkPostRequest()
+        binding.btnShowDialog.setOnClickListener {
+            showAlertDialog()
         }
 
-        binding.btnGraphql.setOnClickListener {
-            updateStatus("Sending GraphQL event...")
-            triggerGraphQLEvent()
+        binding.btnShowCustomDialog.setOnClickListener {
+            showCustomDialog()
         }
 
-        binding.btnClickEvent.setOnClickListener {
-            updateStatus("Simulating click event...")
-            simulateClickEvent()
-        }
-
-        binding.btnCustomEvent.setOnClickListener {
-            updateStatus("Sending custom event...")
-            sendCustomEvent()
-        }
-
-        binding.btnViewComponent.setOnClickListener {
-            updateStatus("Sending view component event...")
-            sendViewComponentEvent()
-        }
-
-        binding.btnMetadata.setOnClickListener {
-            updateStatus("Updating metadata...")
-            updateUserMetadata()
-        }
-
-        binding.btnError.setOnClickListener {
-            updateStatus("Triggering error...")
-            triggerError()
+        binding.btnShowSnackbar.setOnClickListener {
+            showSnackbar()
         }
     }
 
-    private fun makeNetworkGetRequest() {
-        thread {
-            try {
-                val url = URL("https://jsonplaceholder.typicode.com/posts/1")
-                val connection = url.openConnection() as HttpURLConnection
-                connection.requestMethod = "GET"
-                connection.setRequestProperty("Content-Type", "application/json")
+    private fun showBottomSheet() {
+        val bottomSheet = BottomSheetDialog(requireContext())
+        val bottomSheetBinding = BottomsheetDemoBinding.inflate(layoutInflater)
+        bottomSheet.setContentView(bottomSheetBinding.root)
 
-                val networkListener = NetworkListener(connection)
-
-                val reader = BufferedReader(InputStreamReader(connection.inputStream))
-                val response = StringBuilder()
-                var line: String?
-                while (reader.readLine().also { line = it } != null) {
-                    response.append(line)
-                }
-                reader.close()
-
-                networkListener.finish(connection, response.toString().toByteArray())
-                
-                activity?.runOnUiThread {
-                    updateStatus("GET request completed")
-                }
-            } catch (e: Exception) {
-                activity?.runOnUiThread {
-                    updateStatus("GET request failed: ${e.message}")
-                }
-            }
-        }
-    }
-
-    private fun makeNetworkPostRequest() {
-        thread {
-            try {
-                val url = URL("https://jsonplaceholder.typicode.com/posts")
-                val connection = url.openConnection() as HttpURLConnection
-                connection.requestMethod = "POST"
-                connection.setRequestProperty("Content-Type", "application/json")
-                connection.doOutput = true
-
-                val networkListener = NetworkListener(connection)
-                
-                val postData = JSONObject().apply {
-                    put("title", "Test Post")
-                    put("body", "This is a test post from OpenReplay")
-                    put("userId", 1)
-                }
-                
-                networkListener.setRequestBody(postData.toString())
-                
-                connection.outputStream.use { os ->
-                    os.write(postData.toString().toByteArray())
-                }
-
-                val reader = BufferedReader(InputStreamReader(connection.inputStream))
-                val response = StringBuilder()
-                var line: String?
-                while (reader.readLine().also { line = it } != null) {
-                    response.append(line)
-                }
-                reader.close()
-
-                networkListener.finish(connection, response.toString().toByteArray())
-                
-                activity?.runOnUiThread {
-                    updateStatus("POST request completed")
-                }
-            } catch (e: Exception) {
-                activity?.runOnUiThread {
-                    updateStatus("POST request failed: ${e.message}")
-                }
-            }
-        }
-    }
-
-    private fun triggerGraphQLEvent() {
-        val variables = mapOf(
-            "userId" to 123,
-            "includeDetails" to true
-        )
-
-        val message = mapOf(
-            "operationKind" to "query",
-            "operationName" to "getUserProfile",
-            "variables" to variables,
-            "response" to mapOf(
-                "data" to mapOf(
-                    "user" to mapOf(
-                        "id" to 123,
-                        "name" to "Test User",
-                        "email" to "test@example.com",
-                        "role" to "tester"
-                    )
-                )
-            ),
-            "duration" to 145
-        )
-
-        OpenReplay.sendMessage("gql", message)
-        updateStatus("GraphQL event sent")
-    }
-
-    private fun simulateClickEvent() {
-        val motionEvent = MotionEvent.obtain(
-            System.currentTimeMillis(),
-            System.currentTimeMillis(),
-            MotionEvent.ACTION_UP,
-            150f,
-            200f,
-            0
-        )
-        Analytics.sendClick(motionEvent, "Simulated Button Click")
-        motionEvent.recycle()
-        updateStatus("Click event sent (150, 200)")
-    }
-
-    private fun sendCustomEvent() {
-        OpenReplay.event(
-            "button_click_test",
-            mapOf(
-                "button_id" to "custom_event_btn",
-                "timestamp" to System.currentTimeMillis(),
-                "screen" to "home_fragment",
-                "user_action" to "manual_trigger"
-            )
-        )
-        updateStatus("Custom event sent")
-    }
-
-    private fun sendViewComponentEvent() {
-        val event = ORMobileViewComponentEvent(
-            screenName = "HomeFragment",
-            viewName = "test_component",
-            visible = true
-        )
-        MessageCollector.sendMessage(event)
-        updateStatus("View component event sent (visible=true)")
-    }
-
-    private fun updateUserMetadata() {
-        OpenReplay.setUserID("test_user_${System.currentTimeMillis()}")
-        OpenReplay.setMetadata("subscription", "premium")
-        OpenReplay.setMetadata("theme", "dark")
-        OpenReplay.setMetadata("language", "en")
-        updateStatus("User metadata updated")
-    }
-
-    private fun triggerError() {
-        try {
-            throw RuntimeException("Intentional test error from OpenReplay tracker")
-        } catch (e: Exception) {
+        bottomSheetBinding.btnBottomsheetSubmit.setOnClickListener {
+            val name = bottomSheetBinding.bottomsheetInputName.text.toString()
+            val email = bottomSheetBinding.bottomsheetInputEmail.text.toString()
+            
             OpenReplay.event(
-                "error_triggered",
+                "bottomsheet_form_submitted",
                 mapOf(
-                    "error_message" to e.message,
-                    "error_type" to e.javaClass.simpleName
+                    "name" to name,
+                    "email" to email,
+                    "source" to "demo_bottomsheet"
                 )
             )
-            updateStatus("Error triggered and logged")
+            
+            updateStatus("✅ Bottom sheet form submitted: $name")
+            bottomSheet.dismiss()
         }
+
+        bottomSheetBinding.btnBottomsheetCancel.setOnClickListener {
+            OpenReplay.event("bottomsheet_cancelled", mapOf("action" to "user_cancelled"))
+            bottomSheet.dismiss()
+        }
+
+        OpenReplay.event("bottomsheet_opened", mapOf("type" to "demo_form"))
+        bottomSheet.show()
     }
 
-    private fun updateStatus(message: String) {
-        activity?.runOnUiThread {
-            binding.textStatus.text = "Status: $message"
+    private fun showAlertDialog() {
+        AlertDialog.Builder(requireContext())
+            .setTitle("🎯 Alert Dialog")
+            .setMessage("This is a standard Android AlertDialog. All interactions are tracked by OpenReplay.")
+            .setPositiveButton("Confirm") { dialog, _ ->
+                OpenReplay.event("alert_dialog_confirmed", mapOf("action" to "positive"))
+                updateStatus("✅ Alert dialog confirmed")
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel") { dialog, _ ->
+                OpenReplay.event("alert_dialog_cancelled", mapOf("action" to "negative"))
+                updateStatus("⚠️ Alert dialog cancelled")
+                dialog.dismiss()
+            }
+            .setNeutralButton("More Info") { _, _ ->
+                OpenReplay.event("alert_dialog_info", mapOf("action" to "neutral"))
+                updateStatus("ℹ️ More info requested")
+            }
+            .show()
+        
+        OpenReplay.event("alert_dialog_shown", mapOf("type" to "demo_alert"))
+    }
+
+    private fun showCustomDialog() {
+        val dialog = AlertDialog.Builder(requireContext()).create()
+        val dialogBinding = DialogCustomBinding.inflate(layoutInflater)
+        dialog.setView(dialogBinding.root)
+
+        dialogBinding.btnDialogOk.setOnClickListener {
+            val username = dialogBinding.dialogInputUsername.text.toString()
+            val remember = dialogBinding.dialogCheckboxRemember.isChecked
+            
+            OpenReplay.event(
+                "custom_dialog_submitted",
+                mapOf(
+                    "username" to username,
+                    "remember_me" to remember,
+                    "dialog_type" to "login_form"
+                )
+            )
+            
+            updateStatus("✅ Custom dialog submitted: $username (Remember: $remember)")
+            dialog.dismiss()
         }
+
+        dialogBinding.btnDialogCancel.setOnClickListener {
+            OpenReplay.event("custom_dialog_cancelled", mapOf("action" to "cancel"))
+            dialog.dismiss()
+        }
+
+        OpenReplay.event("custom_dialog_opened", mapOf("type" to "login_preferences"))
+        dialog.show()
+    }
+
+    private fun showSnackbar() {
+        Snackbar.make(binding.root, "📢 This is a Snackbar with an action!", Snackbar.LENGTH_LONG)
+            .setAction("UNDO") {
+                OpenReplay.event("snackbar_action_clicked", mapOf("action" to "undo"))
+                updateStatus("✅ Snackbar action clicked")
+            }
+            .addCallback(object : Snackbar.Callback() {
+                override fun onShown(sb: Snackbar?) {
+                    OpenReplay.event("snackbar_shown", mapOf("message" to "demo_snackbar"))
+                }
+                
+                override fun onDismissed(transientBottomBar: Snackbar?, event: Int) {
+                    val dismissReason = when (event) {
+                        DISMISS_EVENT_ACTION -> "action_clicked"
+                        DISMISS_EVENT_TIMEOUT -> "timeout"
+                        DISMISS_EVENT_MANUAL -> "manual"
+                        DISMISS_EVENT_CONSECUTIVE -> "consecutive"
+                        else -> "unknown"
+                    }
+                    OpenReplay.event("snackbar_dismissed", mapOf("reason" to dismissReason))
+                }
+            })
+            .show()
+        
+        updateStatus("📢 Snackbar displayed")
+    }
+    
+    private fun updateStatus(message: String) {
+        binding.textStatus.text = message
     }
 
     override fun onDestroyView() {

@@ -1,22 +1,139 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:fillViewport="true"
     tools:context=".ui.notifications.NotificationsFragment">
 
-    <TextView
-        android:id="@+id/text_notifications"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginStart="8dp"
-        android:layout_marginTop="8dp"
-        android:layout_marginEnd="8dp"
-        android:textAlignment="center"
-        android:textSize="20sp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
-</androidx.constraintlayout.widget.ConstraintLayout>
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🎯 Custom Events Demo"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Track custom events, user metadata, and application errors for comprehensive analytics."
+            android:textSize="12sp"
+            android:layout_marginBottom="16dp"
+            android:textColor="#666" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="User Actions"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btn_checkout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🛒 E-commerce: Checkout Started"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btn_video_play"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="▶️ Media: Video Played"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btn_share"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="📤 Social: Content Shared"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="User Management"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btn_set_user"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="👤 Set User ID &amp; Metadata"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btn_premium_upgrade"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="⭐ Premium Upgrade Event"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Error &amp; Performance"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btn_log_error"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="⚠️ Log Application Error"
+            android:backgroundTint="#F44336"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btn_crash"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="💥 Simulate Crash (Handled)"
+            android:backgroundTint="#D32F2F"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="📊 Event Log"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/text_event_log"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Events will appear here..."
+            android:textSize="12sp"
+            android:padding="12dp"
+            android:background="#F5F5F5"
+            android:fontFamily="monospace"
+            android:maxLines="8"
+            android:scrollbars="vertical"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:id="@+id/text_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Ready to track events"
+            android:textSize="13sp"
+            android:padding="12dp"
+            android:background="#E8F5E9"
+            android:textColor="#2E7D32" />
+
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>

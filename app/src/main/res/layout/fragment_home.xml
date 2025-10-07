@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:fillViewport="true"
     tools:context=".ui.home.HomeFragment">
 
     <LinearLayout
@@ -13,22 +14,20 @@
         android:padding="16dp">
 
         <TextView
-            android:id="@+id/text_home"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="OpenReplay Test Controls"
-            android:textAlignment="center"
-            android:textSize="24sp"
+            android:text="Input Tracking Demo"
+            android:textSize="20sp"
             android:textStyle="bold"
-            android:layout_marginBottom="16dp" />
+            android:layout_marginBottom="8dp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Swipe Area (Try swiping in any direction)"
+            android:text="All EditText fields are automatically tracked. Password fields are auto-masked."
             android:textSize="12sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="4dp" />
+            android:layout_marginBottom="16dp"
+            android:textColor="#666" />
 
         <FrameLayout
             android:id="@+id/swipe_area"
@@ -114,74 +113,70 @@
             android:layout_height="wrap_content"
             android:text="Toggle Sanitization (Currently: ON)"
             android:backgroundTint="#FF9800"
+            android:layout_marginBottom="24dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="✨ Gesture Tracking"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="All touch events are automatically captured including taps, swipes, and scrolls."
+            android:textSize="12sp"
+            android:textColor="#666"
             android:layout_marginBottom="16dp" />
 
-        <Button
-            android:id="@+id/btn_network_get"
+        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Trigger Network GET Request"
+            android:text="🎨 Floating Components"
+            android:textSize="16sp"
+            android:textStyle="bold"
             android:layout_marginBottom="8dp" />
 
         <Button
-            android:id="@+id/btn_network_post"
+            android:id="@+id/btn_show_bottomsheet"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Trigger Network POST Request"
+            android:text="📋 Show Bottom Sheet"
             android:layout_marginBottom="8dp" />
 
         <Button
-            android:id="@+id/btn_graphql"
+            android:id="@+id/btn_show_dialog"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Trigger GraphQL Event"
+            android:text="💬 Show Alert Dialog"
             android:layout_marginBottom="8dp" />
 
         <Button
-            android:id="@+id/btn_click_event"
+            android:id="@+id/btn_show_custom_dialog"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Simulate Click Event"
+            android:text="🎨 Show Custom Dialog"
             android:layout_marginBottom="8dp" />
 
         <Button
-            android:id="@+id/btn_custom_event"
+            android:id="@+id/btn_show_snackbar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Send Custom Event"
-            android:layout_marginBottom="8dp" />
-
-        <Button
-            android:id="@+id/btn_view_component"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Send View Component Event"
-            android:layout_marginBottom="8dp" />
-
-        <Button
-            android:id="@+id/btn_metadata"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Update User Metadata"
-            android:layout_marginBottom="8dp" />
-
-        <Button
-            android:id="@+id/btn_error"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Trigger Error"
-            android:backgroundTint="#F44336"
+            android:text="📢 Show Snackbar"
             android:layout_marginBottom="16dp" />
 
         <TextView
             android:id="@+id/text_status"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Status: Ready"
-            android:textSize="14sp"
+            android:text="✅ Tracker Active | Session ID: Initializing..."
+            android:textSize="13sp"
             android:padding="12dp"
-            android:background="#E0E0E0"
+            android:background="#E8F5E9"
+            android:textColor="#2E7D32"
             android:layout_marginTop="8dp" />
 
     </LinearLayout>
-</ScrollView>
+</androidx.core.widget.NestedScrollView>
