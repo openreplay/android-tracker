@@ -93,20 +93,15 @@ object ScreenshotManager {
 
     @Synchronized
     fun addSanitizedElement(view: View) {
-        // Clean up null references first
         sanitizedElements.removeAll { it.get() == null }
         
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("Sanitizing view: $view")
-        }
+        DebugUtils.log("Sanitizing view: $view")
         sanitizedElements.add(WeakReference(view))
     }
 
     @Synchronized
     fun removeSanitizedElement(view: View) {
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("Removing sanitized view: $view")
-        }
+        DebugUtils.log("Removing sanitized view: $view")
         // Remove by matching the actual view and clean up null references
         sanitizedElements.removeAll { it.get() == view || it.get() == null }
     }
@@ -152,9 +147,7 @@ object ScreenshotManager {
                     archivateFolder(folder = screenShotFolder)
                 }
             } catch (e: IllegalStateException) {
-                if (OpenReplay.options.debugLogs) {
-                    DebugUtils.log("Screenshot skipped: ${e.message}")
-                }
+                DebugUtils.log("Screenshot skipped: ${e.message}")
             } catch (e: Exception) {
                 DebugUtils.error("Screenshot error: ${e.message}")
             }
@@ -183,14 +176,12 @@ object ScreenshotManager {
                 MessageCollector.sendMessage(
                     ORMobilePerformanceEvent(name = "orientation", value = currentOrientation.toULong())
                 )
-                if (OpenReplay.options.debugLogs) {
-                    val orientationName = when (currentOrientation) {
-                        1 -> "Portrait"
-                        3 -> "Landscape"
-                        else -> "Unknown"
-                    }
-                    DebugUtils.log("Orientation changed before screenshot: $orientationName ($currentOrientation)")
+                val orientationName = when (currentOrientation) {
+                    1 -> "Portrait"
+                    3 -> "Landscape"
+                    else -> "Unknown"
                 }
+                DebugUtils.log("Orientation changed before screenshot: $orientationName ($currentOrientation)")
             }
         } catch (e: Exception) {
             DebugUtils.error("Error checking orientation: ${e.message}")
@@ -201,11 +192,8 @@ object ScreenshotManager {
     private fun archivateFolder(folder: File) { 
         val screenshots = folder.listFiles().orEmpty().sortedBy { it.lastModified() }
         
-        // Skip if no screenshots
         if (screenshots.isEmpty()) {
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("No screenshots to archive")
-            }
+            DebugUtils.log("No screenshots to archive")
             return
         }
 
@@ -319,14 +307,10 @@ object ScreenshotManager {
             if (vv is ViewGroup) {
                 for (i in 0 until vv.childCount) {
                     val child = vv.getChildAt(i)
-                    if (OpenReplay.options.debugLogs) {
-                        DebugUtils.log("iterateComposeView child: ${child::class.java.name}")
-                    }
+                    DebugUtils.log("iterateComposeView child: ${child::class.java.name}")
 
                     if (child is SanitizableViewGroup) {
-                        if (OpenReplay.options.debugLogs) {
-                            DebugUtils.log("SanitizableViewGroup found")
-                        }
+                        DebugUtils.log("SanitizableViewGroup found")
                         val location = IntArray(2)
                         child.getLocationInWindow(location)
                         val rootViewLocation = IntArray(2)
@@ -443,10 +427,8 @@ object ScreenshotManager {
                     newWidth = (newHeight * aspectRatio).toInt().coerceAtLeast(1)
                 }
                 
-                if (OpenReplay.options.debugLogs) {
-                    val orientation = if (originalWidth < originalHeight) "Portrait" else "Landscape"
-                    DebugUtils.log("Screenshot scaling: $orientation ${originalWidth}x${originalHeight} -> ${newWidth}x${newHeight}")
-                }
+                val orientation = if (originalWidth < originalHeight) "Portrait" else "Landscape"
+                DebugUtils.log("Screenshot scaling: $orientation ${originalWidth}x${originalHeight} -> ${newWidth}x${newHeight}")
 
                 val updated = if (originalBitmap.width == newWidth && originalBitmap.height == newHeight) {
                     originalBitmap
@@ -481,17 +463,13 @@ object ScreenshotManager {
         val activity = this
         
         if (activity.isFinishing || activity.isDestroyed) {
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("Activity is finishing or destroyed, skipping screenshot")
-            }
+            DebugUtils.log("Activity is finishing or destroyed, skipping screenshot")
             return
         }
         
         val view = window?.decorView?.rootView
         if (view == null || view.width <= 0 || view.height <= 0) {
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.error("Invalid view for screenshot")
-            }
+            DebugUtils.error("Invalid view for screenshot")
             return
         }
         
@@ -524,9 +502,7 @@ object ScreenshotManager {
                                 result(bitmap)
                             }
                             else -> {
-                                if (OpenReplay.options.debugLogs) {
-                                    DebugUtils.error("PixelCopy failed with result: $copyResult, falling back to oldViewToBitmap")
-                                }
+                                DebugUtils.error("PixelCopy failed with result: $copyResult, falling back to oldViewToBitmap")
                                 bitmap.recycle()
                                 try {
                                     result(oldViewToBitmap(view))

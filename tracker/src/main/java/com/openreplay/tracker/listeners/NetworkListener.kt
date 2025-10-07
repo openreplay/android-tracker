@@ -59,9 +59,7 @@ open class NetworkListener {
             // Note: HttpURLConnection doesn't provide easy access to request body after it's written.
             // Request body should be set externally using setRequestBody() method before the request is sent.
             // Attempting to read from inputStream here is incorrect as that's for response data.
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("NetworkListener started: $method $url")
-            }
+            DebugUtils.log("NetworkListener started: $method $url")
         } catch (e: Exception) {
             DebugUtils.error("Error in NetworkListener.start: ${e.message}")
         }
@@ -86,9 +84,7 @@ open class NetworkListener {
                 val responseBody = if (data != null && data.size <= maxBodySize) {
                     data.toString(StandardCharsets.UTF_8)
                 } else if (data != null && data.size > maxBodySize) {
-                    if (OpenReplay.options.debugLogs) {
-                        DebugUtils.log("Response body too large (${data.size} bytes), truncating")
-                    }
+                    DebugUtils.log("Response body too large (${data.size} bytes), truncating")
                     data.take(maxBodySize).toByteArray().toString(StandardCharsets.UTF_8) + "... [truncated]"
                 } else {
                     null
@@ -118,9 +114,7 @@ open class NetworkListener {
                 val status = connection?.responseCode ?: 0
                 val duration = endTime - startTime
 
-                if (OpenReplay.options.debugLogs) {
-                    DebugUtils.log("Network call completed: $method $url - Status: $status, Duration: ${duration}ms")
-                }
+                DebugUtils.log("Network call completed: $method $url - Status: $status, Duration: ${duration}ms")
 
                 sendNetworkMessage(url, method, requestJSON, responseJSON, status, duration.toULong())
             } catch (e: Exception) {

@@ -107,9 +107,7 @@ object MessageCollector {
             flushMessages()
         }
         
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("MessageCollector paused")
-        }
+        DebugUtils.log("MessageCollector paused")
     }
     
     fun resume() {
@@ -131,9 +129,7 @@ object MessageCollector {
             startCycleBuffer()
         }
         
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("MessageCollector resumed")
-        }
+        DebugUtils.log("MessageCollector resumed")
     }
 
     fun stop() {
@@ -164,16 +160,12 @@ object MessageCollector {
         isStarted = false
         isPaused = false
         
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("MessageCollector stopped")
-        }
+        DebugUtils.log("MessageCollector stopped")
     }
 
     private fun flushMessages() {
         if (NetworkManager.sessionId == null && !sendingLastMessages) {
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("Session not initialized yet, skipping flush")
-            }
+            DebugUtils.log("Session not initialized yet, skipping flush")
             return
         }
         
@@ -232,9 +224,7 @@ object MessageCollector {
 
     fun sendMessage(message: ORMessage) {
         if (isPaused) {
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("MessageCollector is paused, message dropped")
-            }
+            DebugUtils.log("MessageCollector is paused, message dropped")
             return
         }
         
@@ -248,15 +238,12 @@ object MessageCollector {
                 OpenReplay.triggerRecording(trigger)
             }
         }
-        if (OpenReplay.options.debugLogs) {
-            if (!message.toString().contains("Log") && !message.toString()
-                    .contains("NetworkCall")
-            ) {
-                DebugUtils.log(message.toString())
-            }
-            (message as? ORMobileNetworkCall)?.let { networkCallMessage ->
-                DebugUtils.log("-->> MobileNetworkCall(105): ${networkCallMessage.method} ${networkCallMessage.URL}")
-            }
+        
+        if (!message.toString().contains("Log") && !message.toString().contains("NetworkCall")) {
+            DebugUtils.log(message.toString())
+        }
+        (message as? ORMobileNetworkCall)?.let { networkCallMessage ->
+            DebugUtils.log("-->> MobileNetworkCall(105): ${networkCallMessage.method} ${networkCallMessage.URL}")
         }
 
         sendRawMessage(data = message.contentData())

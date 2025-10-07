@@ -27,9 +27,7 @@ object SessionRequest {
 
     fun create(context: Context, activityContext: Context?, doNotRecord: Boolean, completion: (SessionResponse?) -> Unit) {
         cachedSessionResponse.get()?.let {
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("Returning cached session: ${it.sessionID}")
-            }
+            DebugUtils.log("Returning cached session: ${it.sessionID}")
             completion(it)
             return
         }
@@ -86,18 +84,14 @@ object SessionRequest {
             params["timezone"] = getTimezone()
             params["performances"] = performances
             
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("Session params initialized with performances: $performances")
-            }
+            DebugUtils.log("Session params initialized with performances: $performances")
         }
     }
 
     private fun getDeviceResolution(context: Context): Pair<Int, Int> {
         return try {
             if (context !is android.app.Activity && context !is android.view.ContextThemeWrapper) {
-                if (OpenReplay.options.debugLogs) {
-                    DebugUtils.log("Non-visual context provided for resolution, using display metrics")
-                }
+                DebugUtils.log("Non-visual context provided for resolution, using display metrics")
                 val metrics = context.resources.displayMetrics
                 return Pair(metrics.widthPixels, metrics.heightPixels)
             }
@@ -149,9 +143,7 @@ object SessionRequest {
                         params.clear()
                     }
                     
-                    if (OpenReplay.options.debugLogs) {
-                        DebugUtils.log("Session created: ${sessionResponse.sessionID}")
-                    }
+                    DebugUtils.log("Session created: ${sessionResponse.sessionID}")
                     completion(sessionResponse)
                 }
                 retryCount.incrementAndGet() <= MAX_RETRIES -> {

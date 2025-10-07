@@ -54,15 +54,11 @@ class LifecycleManager(
         currentActivityRef = null
         startedActivityCount = 0
         
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("LifecycleManager unregistered")
-        }
+        DebugUtils.log("LifecycleManager unregistered")
     }
 
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("Activity created: ${activity.localClassName}")
-        }
+        DebugUtils.log("Activity created: ${activity.localClassName}")
         currentActivityRef = WeakReference(activity)
     }
 
@@ -72,15 +68,11 @@ class LifecycleManager(
         
         // Only resume session when transitioning from background to foreground
         if (startedActivityCount == 1) {
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("App entering foreground - resuming tracker")
-            }
+            DebugUtils.log("App entering foreground - resuming tracker")
             OpenReplay.resume()
             Analytics.sendBackgroundEvent(0u)
         } else {
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("Activity started (count: $startedActivityCount): ${activity.localClassName}")
-            }
+            DebugUtils.log("Activity started (count: $startedActivityCount): ${activity.localClassName}")
         }
     }
 
@@ -101,16 +93,12 @@ class LifecycleManager(
         
         // Only pause session when all activities are stopped AND not a configuration change
         if (startedActivityCount <= 0 && !isChangingConfiguration) {
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("App entering background - pausing tracker")
-            }
+            DebugUtils.log("App entering background - pausing tracker")
             Analytics.sendBackgroundEvent(1u)
             OpenReplay.pause()
             startedActivityCount = 0 // Ensure it doesn't go negative
         } else {
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("Activity stopped (remaining: $startedActivityCount): ${activity.localClassName}")
-            }
+            DebugUtils.log("Activity stopped (remaining: $startedActivityCount): ${activity.localClassName}")
         }
         
         isChangingConfiguration = false
@@ -121,9 +109,7 @@ class LifecycleManager(
     }
 
     override fun onActivityDestroyed(activity: Activity) {
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("Activity destroyed: ${activity.localClassName}")
-        }
+        DebugUtils.log("Activity destroyed: ${activity.localClassName}")
         if (currentActivityRef?.get() == activity) {
             currentActivityRef?.clear()
             currentActivityRef = null

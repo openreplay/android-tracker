@@ -73,9 +73,7 @@ object Analytics {
             val message = ORMobileClickEvent(label = label ?: "Unknown", x = ev.x, y = ev.y)
             MessageCollector.sendMessage(message)
         } catch (e: Exception) {
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.error("Error sending click event: ${e.message}")
-            }
+            DebugUtils.error("Error sending click event: ${e.message}")
         }
     }
 
@@ -88,9 +86,7 @@ object Analytics {
             )
             MessageCollector.sendMessage(message)
         } catch (e: Exception) {
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.error("Error sending swipe event: ${e.message}")
-            }
+            DebugUtils.error("Error sending swipe event: ${e.message}")
         }
     }
 
@@ -105,9 +101,7 @@ object Analytics {
             )
             MessageCollector.sendMessage(message)
         } catch (e: Exception) {
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.error("Error sending text input event: ${e.message}")
-            }
+            DebugUtils.error("Error sending text input event: ${e.message}")
         }
     }
 
@@ -118,9 +112,7 @@ object Analytics {
         observedViews.clear()
         observedInputs.clear()
         
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("Analytics stopped")
-        }
+        DebugUtils.log("Analytics stopped")
     }
     
     /**
@@ -149,9 +141,7 @@ object Analytics {
             val message = ORMobilePerformanceEvent("background", value)
             MessageCollector.sendMessage(message)
         } catch (e: Exception) {
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.error("Error sending background event: ${e.message}")
-            }
+            DebugUtils.error("Error sending background event: ${e.message}")
         }
     }
 }
@@ -213,16 +203,12 @@ open class TrackingActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("TrackingActivity started: ${this::class.java.simpleName}")
-        }
+        DebugUtils.log("TrackingActivity started: ${this::class.java.simpleName}")
     }
 
     override fun onStop() {
         super.onStop()
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("TrackingActivity stopped: ${this::class.java.simpleName}")
-        }
+        DebugUtils.log("TrackingActivity stopped: ${this::class.java.simpleName}")
     }
 
     override fun onDestroy() {
@@ -231,9 +217,7 @@ open class TrackingActivity : AppCompatActivity() {
         handler.removeCallbacks(endOfScrollRunnable)
         handler.removeCallbacksAndMessages(null)
         
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("TrackingActivity destroyed: ${this::class.java.simpleName}")
-        }
+        DebugUtils.log("TrackingActivity destroyed: ${this::class.java.simpleName}")
     }
     
     override fun onPause() {
@@ -389,9 +373,7 @@ fun extractElementLabel(view: View?): String {
         }
     } catch (e: Exception) {
         // Resource not found or invalid, skip
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("Unable to get resource name for view ID: ${view.id}")
-        }
+        DebugUtils.log("Unable to get resource name for view ID: ${view.id}")
     }
     
     // Add text content if available
@@ -412,9 +394,7 @@ fun extractElementLabel(view: View?): String {
         }
     } catch (e: Exception) {
         // Error reading text, skip
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("Error reading text from view: ${e.message}")
-        }
+        DebugUtils.log("Error reading text from view: ${e.message}")
     }
     
     // Add content description if available
@@ -488,9 +468,7 @@ class ORGestureListener(private val rootView: View) : GestureDetector.SimpleOnGe
         if (isScrolling) {
             isScrolling = false
             
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("Swipe detected: $swipeDirection at ($lastX, $lastY)")
-            }
+            DebugUtils.log("Swipe detected: $swipeDirection at ($lastX, $lastY)")
 
             Analytics.sendSwipe(swipeDirection, lastX, lastY)
         }
@@ -504,18 +482,14 @@ class ORGestureListener(private val rootView: View) : GestureDetector.SimpleOnGe
         handler.removeCallbacks(endOfScrollRunnable)
         handler.removeCallbacksAndMessages(null)
         
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("ORGestureListener cleaned up")
-        }
+        DebugUtils.log("ORGestureListener cleaned up")
     }
 
     override fun onSingleTapUp(e: MotionEvent): Boolean {
         val clickedView = findViewAtPosition(rootView, e.rawX, e.rawY)
         val elementLabel = getViewDescription(clickedView)
         
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("Click detected: $elementLabel at (${e.x}, ${e.y})")
-        }
+        DebugUtils.log("Click detected: $elementLabel at (${e.x}, ${e.y})")
         
         Analytics.sendClick(e, elementLabel)
         return true
@@ -591,9 +565,7 @@ fun Modifier.trackTouchEvents(label: String? = "Unknown"): Modifier {
                 val event = awaitPointerEvent()
                 event.changes.forEach { change ->
                     if (change.pressed) {
-                        if (OpenReplay.options.debugLogs) {
-                            DebugUtils.log("Touch at $label: (${change.position.x}, ${change.position.y})")
-                        }
+                        DebugUtils.log("Touch at $label: (${change.position.x}, ${change.position.y})")
                         change.consume()
                         Analytics.sendClick(
                             MotionEvent.obtain(
@@ -613,21 +585,15 @@ fun Modifier.trackTouchEvents(label: String? = "Unknown"): Modifier {
         detectDragGestures(onDragStart = { offset ->
             initialX = offset.x
             initialY = offset.y
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("Drag started at (${offset.x}, ${offset.y})")
-            }
+            DebugUtils.log("Drag started at (${offset.x}, ${offset.y})")
         }, onDragEnd = {
             val distanceX = currentX - initialX
             val distanceY = currentY - initialY
             val direction = SwipeDirection.fromDistances(distanceX, distanceY)
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("Drag ended: $direction at ($currentX, $currentY)")
-            }
+            DebugUtils.log("Drag ended: $direction at ($currentX, $currentY)")
             Analytics.sendSwipe(direction, currentX, currentY)
         }, onDragCancel = {
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("Drag cancelled")
-            }
+            DebugUtils.log("Drag cancelled")
         }, onDrag = { change, _ ->
             currentX = change.position.x
             currentY = change.position.y

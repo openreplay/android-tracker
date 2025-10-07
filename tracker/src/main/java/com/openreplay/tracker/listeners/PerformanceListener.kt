@@ -156,18 +156,14 @@ class PerformanceListener private constructor(applicationContext: Context) :
     override fun onResume(owner: LifecycleOwner) {
         super.onResume(owner)
         lifecycleOwnerRef = WeakReference(owner)
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("Resume")
-        }
+        DebugUtils.log("Resume")
         MessageCollector.sendMessage(ORMobilePerformanceEvent(name = "background", value = 0u))
         start()
     }
 
     override fun onPause(owner: LifecycleOwner) {
         super.onPause(owner)
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("Background")
-        }
+        DebugUtils.log("Background")
         MessageCollector.sendMessage(ORMobilePerformanceEvent(name = "background", value = 1u))
         stop()
     }
@@ -175,9 +171,7 @@ class PerformanceListener private constructor(applicationContext: Context) :
     @Synchronized
     fun start() {
         if (isActive) {
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("PerformanceListener already active, skipping start")
-            }
+            DebugUtils.log("PerformanceListener already active, skipping start")
             return
         }
         
@@ -201,9 +195,7 @@ class PerformanceListener private constructor(applicationContext: Context) :
                 
                 if (scale > 0) {
                     val batteryPct = (level * 100 / scale.toFloat()).toInt()
-                    if (OpenReplay.options.debugLogs) {
-                        DebugUtils.log("Battery level: $batteryPct%")
-                    }
+                    DebugUtils.log("Battery level: $batteryPct%")
                     MessageCollector.sendMessage(
                         ORMobilePerformanceEvent(name = "batteryLevel", value = batteryPct.toULong())
                     )
@@ -259,9 +251,7 @@ class PerformanceListener private constructor(applicationContext: Context) :
     private fun reportCpuUsage() {
         try {
             val cpuUsage = calculateCpuUsage()
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("Main thread responsiveness: ${cpuUsage}ms")
-            }
+            DebugUtils.log("Main thread responsiveness: ${cpuUsage}ms")
             MessageCollector.sendMessage(
                 ORMobilePerformanceEvent(name = "mainThreadCPU", value = cpuUsage.toULong())
             )
@@ -273,9 +263,7 @@ class PerformanceListener private constructor(applicationContext: Context) :
     private fun reportMemoryUsage() {
         try {
             val memoryUsage = memoryUsage()
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("Memory Usage: $memoryUsage MB")
-            }
+            DebugUtils.log("Memory Usage: $memoryUsage MB")
             MessageCollector.sendMessage(
                 ORMobilePerformanceEvent(name = "memoryUsage", value = memoryUsage.toULong())
             )
@@ -349,9 +337,7 @@ class PerformanceListener private constructor(applicationContext: Context) :
                 ORMobilePerformanceEvent(name = "activeProcessorCount", value = processorCount.toULong())
             )
 
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("Physical Memory: ${physicalMemory / 1048576L} MB, Processors: $processorCount")
-            }
+            DebugUtils.log("Physical Memory: ${physicalMemory / 1048576L} MB, Processors: $processorCount")
         } catch (e: Exception) {
             DebugUtils.error("Error reporting system info: ${e.message}")
         }
@@ -397,14 +383,10 @@ class PerformanceListener private constructor(applicationContext: Context) :
                 frameCount = 0
                 lastFrameTime = currentTime
 
-                if (OpenReplay.options.debugLogs) {
-                    DebugUtils.log("FPS: $fps")
-                }
+                DebugUtils.log("FPS: $fps")
             }
 
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("Performance metrics reported: uptime=${uptime}s")
-            }
+            DebugUtils.log("Performance metrics reported: uptime=${uptime}s")
         } catch (e: Exception) {
             DebugUtils.error("Error reporting performance metrics: ${e.message}")
         }
@@ -414,9 +396,7 @@ class PerformanceListener private constructor(applicationContext: Context) :
     @Synchronized
     fun stop() {
         if (!isActive) {
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("PerformanceListener already stopped")
-            }
+            DebugUtils.log("PerformanceListener already stopped")
             return
         }
         
@@ -441,22 +421,16 @@ class PerformanceListener private constructor(applicationContext: Context) :
         
         isActive = false
         
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("PerformanceListener stopped successfully")
-        }
+        DebugUtils.log("PerformanceListener stopped successfully")
     }
 
     private fun unregisterBatteryLevelReceiver() {
         batteryLevelReceiver?.let { receiver ->
             try {
                 appContext.unregisterReceiver(receiver)
-                if (OpenReplay.options.debugLogs) {
-                    DebugUtils.log("Battery level receiver unregistered")
-                }
+                DebugUtils.log("Battery level receiver unregistered")
             } catch (e: IllegalArgumentException) {
-                if (OpenReplay.options.debugLogs) {
-                    DebugUtils.log("Battery level receiver was not registered or already unregistered")
-                }
+                DebugUtils.log("Battery level receiver was not registered or already unregistered")
             } catch (e: Exception) {
                 DebugUtils.error("Error unregistering battery receiver: ${e.message}")
             } finally {
@@ -470,9 +444,7 @@ class PerformanceListener private constructor(applicationContext: Context) :
             MessageCollector.sendMessage(
                 ORMobilePerformanceEvent(name = name, value = value)
             )
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("Custom performance event sent: $name = $value")
-            }
+            DebugUtils.log("Custom performance event sent: $name = $value")
         } catch (e: Exception) {
             DebugUtils.error("Error sending custom performance event: ${e.message}")
         }

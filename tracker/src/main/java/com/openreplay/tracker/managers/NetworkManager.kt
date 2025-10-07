@@ -178,9 +178,7 @@ object NetworkManager {
                     // Save token for late messages
                     token?.let { UserDefaults.lastToken = it }
 
-                    if (OpenReplay.options.debugLogs) {
-                        DebugUtils.log("Session created successfully: $sessionId")
-                    }
+                    DebugUtils.log("Session created successfully: $sessionId")
                     withContext(Dispatchers.Main) { completion(sessionResponse) }
                 } else {
                     DebugUtils.error("Empty response body for createSession")
@@ -210,9 +208,7 @@ object NetworkManager {
 
             val compressedContent = try {
                 compressData(content).also {
-                    if (OpenReplay.options.debugLogs) {
-                        DebugUtils.log("Compressed ${content.size} bytes to ${it.size} bytes")
-                    }
+                    DebugUtils.log("Compressed ${content.size} bytes to ${it.size} bytes")
                 }
             } catch (e: Exception) {
                 DebugUtils.error("Error with compression: ${e.message}")
@@ -234,9 +230,7 @@ object NetworkManager {
 
                 val responseCode = request.responseCode
                 if (responseCode in 200..299) {
-                    if (OpenReplay.options.debugLogs) {
-                        DebugUtils.log("Message sent successfully")
-                    }
+                    DebugUtils.log("Message sent successfully")
                     withContext(Dispatchers.Main) { completion(true) }
                 } else {
                     val errorBody = readErrorStream(request)
@@ -290,9 +284,7 @@ object NetworkManager {
                 val jsonResponse = gson.fromJson<Map<String, List<ApiResponse>>>(responseBody, type)
                 val conditions = jsonResponse["conditions"] ?: emptyList()
                 
-                if (OpenReplay.options.debugLogs) {
-                    DebugUtils.log("Conditions fetched: ${conditions.size} items")
-                }
+                DebugUtils.log("Conditions fetched: ${conditions.size} items")
                 withContext(Dispatchers.Main) { completion(conditions) }
             } catch (e: Exception) {
                 DebugUtils.error("Conditions fetch error: ${e.message}")
@@ -323,9 +315,7 @@ object NetworkManager {
                     outputStream.write(data)
                 }
                 
-                if (OpenReplay.options.debugLogs) {
-                    DebugUtils.log("Data appended to file at: ${filePath.absolutePath}")
-                }
+                DebugUtils.log("Data appended to file at: ${filePath.absolutePath}")
             } catch (e: IOException) {
                 DebugUtils.error("File append error: ${e.message}")
             }
@@ -348,9 +338,7 @@ object NetworkManager {
 
             val compressedContent = try {
                 compressData(content).also {
-                    if (OpenReplay.options.debugLogs) {
-                        DebugUtils.log("Compressed late message ${content.size} bytes to ${it.size} bytes")
-                    }
+                    DebugUtils.log("Compressed late message ${content.size} bytes to ${it.size} bytes")
                 }
             } catch (e: Exception) {
                 DebugUtils.error("Error compressing late message: ${e.message}")
@@ -372,9 +360,7 @@ object NetworkManager {
 
                 val responseCode = request.responseCode
                 if (responseCode in 200..299) {
-                    if (OpenReplay.options.debugLogs) {
-                        DebugUtils.log("Late message sent successfully")
-                    }
+                    DebugUtils.log("Late message sent successfully")
                     withContext(Dispatchers.Main) { completion(true) }
                 } else {
                     val errorBody = readErrorStream(request)
@@ -459,9 +445,7 @@ object NetworkManager {
 
                 val responseCode = request.responseCode
                 if (responseCode in 200..299) {
-                    if (OpenReplay.options.debugLogs) {
-                        DebugUtils.log("Images sent successfully")
-                    }
+                    DebugUtils.log("Images sent successfully")
                     withContext(Dispatchers.Main) { completion(true) }
                 } else {
                     val errorBody = readErrorStream(request)
@@ -482,8 +466,6 @@ object NetworkManager {
      */
     fun cancelAll() {
         networkScope.cancel()
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("NetworkManager: All network operations cancelled")
-        }
+        DebugUtils.log("NetworkManager: All network operations cancelled")
     }
 }

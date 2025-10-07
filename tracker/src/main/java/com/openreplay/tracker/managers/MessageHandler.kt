@@ -112,9 +112,7 @@ object MessageHandler {
 
             MessageCollector.sendMessage(gqlMessage)
 
-            if (OpenReplay.options.debugLogs) {
-                DebugUtils.log("GraphQL message sent: $operationKind - $operationName")
-            }
+            DebugUtils.log("GraphQL message sent: $operationKind - $operationName")
 
         } catch (e: Exception) {
             DebugUtils.error("Error processing GraphQL message", e)
@@ -126,8 +124,6 @@ object MessageHandler {
             activeJobs.forEach { it.cancel() }
             activeJobs.clear()
         }
-        if (OpenReplay.options.debugLogs) {
-            DebugUtils.log("All MessageHandler jobs cancelled")
-        }
+        DebugUtils.log("All MessageHandler jobs cancelled")
     }
 }
