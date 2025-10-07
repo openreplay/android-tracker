@@ -116,7 +116,6 @@ class PerformanceListener private constructor(applicationContext: Context) :
         fun getOrientation(context: Context): Int {
             return try {
                 when (context.resources.configuration.orientation) {
-                    Configuration.ORIENTATION_PORTRAIT -> 1
                     Configuration.ORIENTATION_LANDSCAPE -> 3
                     else -> 0
                 }
@@ -127,7 +126,7 @@ class PerformanceListener private constructor(applicationContext: Context) :
         }
     }
 
-    private val appContext = applicationContext
+    private val appContext: Context = applicationContext.applicationContext
     private var batteryLevelReceiver: BroadcastReceiver? = null
     private val cpuHandler = Handler(Looper.getMainLooper())
     private val memoryHandler = Handler(Looper.getMainLooper())
@@ -436,17 +435,6 @@ class PerformanceListener private constructor(applicationContext: Context) :
             } finally {
                 batteryLevelReceiver = null
             }
-        }
-    }
-
-    fun sendCustomPerformanceEvent(name: String, value: ULong) {
-        try {
-            MessageCollector.sendMessage(
-                ORMobilePerformanceEvent(name = name, value = value)
-            )
-            DebugUtils.log("Custom performance event sent: $name = $value")
-        } catch (e: Exception) {
-            DebugUtils.error("Error sending custom performance event: ${e.message}")
         }
     }
 }
