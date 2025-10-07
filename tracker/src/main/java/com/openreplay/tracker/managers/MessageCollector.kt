@@ -85,7 +85,7 @@ object MessageCollector {
                 executorService.execute {
                     flushMessages()
                 }
-            }, 0, 5, TimeUnit.SECONDS)
+            }, 2, 5, TimeUnit.SECONDS)
         }
     }
 
@@ -125,7 +125,7 @@ object MessageCollector {
             executorService.execute {
                 flushMessages()
             }
-        }, 0, 5, TimeUnit.SECONDS)
+        }, 2, 5, TimeUnit.SECONDS)
         
         if (OpenReplay.bufferingMode) {
             startCycleBuffer()
@@ -170,6 +170,13 @@ object MessageCollector {
     }
 
     private fun flushMessages() {
+        if (NetworkManager.sessionId == null && !sendingLastMessages) {
+            if (OpenReplay.options.debugLogs) {
+                DebugUtils.log("Session not initialized yet, skipping flush")
+            }
+            return
+        }
+        
         val messages = mutableListOf<ByteArray>()
         var sentSize = 0
         while (messagesWaiting.isNotEmpty() && sentSize + messagesWaiting.first().size <= maxMessagesSize) {
