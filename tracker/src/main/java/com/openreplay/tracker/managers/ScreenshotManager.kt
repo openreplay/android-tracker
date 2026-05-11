@@ -29,6 +29,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
@@ -56,6 +58,7 @@ object ScreenshotManager {
             + CoroutineExceptionHandler { _, throwable ->
         DebugUtils.error(throwable)
     })
+    private val archiveMutex = Mutex()
 
     fun setSettings(settings: Triple<Int, Int, Int>) {
         val (_, quality, resolution) = settings
@@ -145,8 +148,10 @@ object ScreenshotManager {
                 val screenShotFolder = getScreenshotFolder()
                 val screenShotFile = File(screenShotFolder, "${System.currentTimeMillis()}.jpeg")
                 FileOutputStream(screenShotFile).use { out -> out.write(compress(screenShotBitmap)) }
-                if (screenShotFolder.listFiles().orEmpty().size >= chunk) {
-                    archivateFolder(folder = screenShotFolder)
+                archiveMutex.withLock {
+                    if (screenShotFolder.listFiles().orEmpty().size >= chunk) {
+                        archivateFolder(folder = screenShotFolder)
+                    }
                 }
             } catch (e: IllegalStateException) {
                 DebugUtils.log("Screenshot skipped: ${e.message}")
@@ -160,7 +165,7 @@ object ScreenshotManager {
         scope.launch {
             try {
                 val screenshotFolder = getScreenshotFolder()
-                archivateFolder(screenshotFolder)
+                archiveMutex.withLock { archivateFolder(screenshotFolder) }
                 sendScreenshotArchives()
             } catch (e: Exception) {
                 DebugUtils.error("Error during termination: ${e.message}")
@@ -220,9 +225,7 @@ object ScreenshotManager {
         val archiveFile = File(archiveFolder, "$sessionId-$lastTs.tar.gz")
         FileOutputStream(archiveFile).use { out -> out.write(combinedData.toByteArray()) }
 
-        scope.launch {
-            screenshots.forEach { it.deleteSafely() }
-        }
+        screenshots.forEach { it.deleteSafely() }
     }
 
     private fun getArchiveFolder(): File {

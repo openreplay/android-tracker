@@ -10,6 +10,8 @@ import com.google.gson.reflect.TypeToken
 import com.openreplay.tracker.OpenReplay
 import com.openreplay.tracker.models.SessionResponse
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -19,6 +21,7 @@ import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.GZIPOutputStream
 
 object NetworkManager {
@@ -32,8 +35,16 @@ object NetworkManager {
     private const val THREAD_STATS_TAG = 1000
     private const val CONNECT_TIMEOUT_MS = 30000 // 30 seconds
     private const val READ_TIMEOUT_MS = 30000 // 30 seconds
-    
+
+    private const val IMAGE_UPLOAD_MAX_CONCURRENCY = 2
+    private const val IMAGE_BACKOFF_BASE_MS = 1_000L
+    private const val IMAGE_BACKOFF_CAP_MS = 30_000L
+
     private val networkScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val imageUploadSemaphore = Semaphore(IMAGE_UPLOAD_MAX_CONCURRENCY)
+    private val consecutiveImageFailures = AtomicInteger(0)
+    @Volatile
+    private var imageBackoffUntilMs = 0L
 
     var baseUrl = "https://api.openreplay.com/ingest"
 
@@ -451,42 +462,57 @@ object NetworkManager {
                 return@launch
             }
 
-            var request: HttpURLConnection? = null
-            try {
-                val boundary = "Boundary-${UUID.randomUUID()}"
-                val parts = buildMultipartParts(
-                    boundary = boundary,
-                    formFields = mapOf("projectKey" to projectKey),
-                    fileFieldName = "batch",
-                    fileName = name,
-                    fileData = images,
-                )
+            imageUploadSemaphore.withPermit {
+                val waitMs = imageBackoffUntilMs - System.currentTimeMillis()
+                if (waitMs > 0) delay(waitMs)
 
-                request = createRequest(
-                    method = "POST",
-                    path = IMAGES_URL,
-                    contentLength = parts.contentLength,
-                    bodyWriter = { os -> parts.writeTo(os) },
-                    headers = mapOf(
-                        "Authorization" to "Bearer $token",
-                        "Content-Type" to "multipart/form-data; boundary=$boundary"
+                var success = false
+                var request: HttpURLConnection? = null
+                try {
+                    val boundary = "Boundary-${UUID.randomUUID()}"
+                    val parts = buildMultipartParts(
+                        boundary = boundary,
+                        formFields = mapOf("projectKey" to projectKey),
+                        fileFieldName = "batch",
+                        fileName = name,
+                        fileData = images,
                     )
-                )
 
-                val responseCode = request.responseCode
-                if (responseCode in 200..299) {
-                    DebugUtils.log("Images sent successfully")
-                    withContext(Dispatchers.Main) { completion(true) }
-                } else {
-                    val errorBody = readErrorStream(request)
-                    DebugUtils.error("Failed to send images: $responseCode - $errorBody")
-                    withContext(Dispatchers.Main) { completion(false) }
+                    request = createRequest(
+                        method = "POST",
+                        path = IMAGES_URL,
+                        contentLength = parts.contentLength,
+                        bodyWriter = { os -> parts.writeTo(os) },
+                        headers = mapOf(
+                            "Authorization" to "Bearer $token",
+                            "Content-Type" to "multipart/form-data; boundary=$boundary"
+                        )
+                    )
+
+                    val responseCode = request.responseCode
+                    if (responseCode in 200..299) {
+                        success = true
+                        DebugUtils.log("Images sent successfully")
+                    } else {
+                        val errorBody = readErrorStream(request)
+                        DebugUtils.error("Failed to send images: $responseCode - $errorBody")
+                    }
+                } catch (e: Exception) {
+                    DebugUtils.error("Error sending images: ${e.message}")
+                } finally {
+                    request?.disconnect()
+                    if (success) {
+                        consecutiveImageFailures.set(0)
+                        imageBackoffUntilMs = 0L
+                    } else {
+                        val n = consecutiveImageFailures.incrementAndGet()
+                        val shift = (n - 1).coerceIn(0, 5)
+                        val backoff = (IMAGE_BACKOFF_BASE_MS shl shift).coerceAtMost(IMAGE_BACKOFF_CAP_MS)
+                        imageBackoffUntilMs = System.currentTimeMillis() + backoff
+                        DebugUtils.log("Image upload backoff ${backoff}ms after $n consecutive failure(s)")
+                    }
+                    withContext(Dispatchers.Main) { completion(success) }
                 }
-            } catch (e: Exception) {
-                DebugUtils.error("Error sending images: ${e.message}")
-                withContext(Dispatchers.Main) { completion(false) }
-            } finally {
-                request?.disconnect()
             }
         }
     }
