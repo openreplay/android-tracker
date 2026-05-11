@@ -10,10 +10,12 @@ import com.google.gson.reflect.TypeToken
 import com.openreplay.tracker.OpenReplay
 import com.openreplay.tracker.models.SessionResponse
 import kotlinx.coroutines.*
+import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
@@ -63,12 +65,25 @@ object NetworkManager {
         path: String,
         body: ByteArray? = null,
         headers: Map<String, String>? = null
+    ): HttpURLConnection = createRequest(
+        method = method,
+        path = path,
+        contentLength = body?.size?.toLong(),
+        bodyWriter = body?.let { bytes -> { os: OutputStream -> os.write(bytes) } },
+        headers = headers,
+    )
+
+    private suspend fun createRequest(
+        method: String,
+        path: String,
+        contentLength: Long?,
+        bodyWriter: ((OutputStream) -> Unit)?,
+        headers: Map<String, String>?
     ): HttpURLConnection = withContext(Dispatchers.IO) {
         val url = URL(baseUrl + path)
         val connection = url.openConnection() as HttpURLConnection
 
         try {
-            // Tag the thread for network usage tracking
             TrafficStats.setThreadStatsTag(THREAD_STATS_TAG)
 
             connection.requestMethod = method
@@ -77,22 +92,20 @@ object NetworkManager {
             connection.connectTimeout = CONNECT_TIMEOUT_MS
             connection.readTimeout = READ_TIMEOUT_MS
 
-            // Add headers to the connection
             headers?.forEach { (key, value) -> connection.setRequestProperty(key, value) }
 
-            // Add body if it's a POST/PUT request
-            if (body != null) {
+            if (bodyWriter != null && contentLength != null) {
                 connection.doOutput = true
-                connection.setRequestProperty("Content-Length", body.size.toString())
-                connection.outputStream.use { outputStream ->
-                    outputStream.write(body)
+                connection.setFixedLengthStreamingMode(contentLength)
+                BufferedOutputStream(connection.outputStream).use { outputStream ->
+                    bodyWriter(outputStream)
+                    outputStream.flush()
                 }
             }
         } catch (e: Exception) {
-            connection.disconnect() // Disconnect in case of failure
+            connection.disconnect()
             throw e
         } finally {
-            // Clear the thread's TrafficStats tag
             TrafficStats.clearThreadStatsTag()
         }
 
@@ -376,33 +389,47 @@ object NetworkManager {
         }
     }
 
-    private fun buildMultipartBody(
+    private data class MultipartParts(
+        val formHeaders: List<ByteArray>,
+        val fileHeader: ByteArray,
+        val fileData: ByteArray,
+        val fileTrailer: ByteArray,
+        val closing: ByteArray,
+    ) {
+        val contentLength: Long =
+            formHeaders.sumOf { it.size.toLong() } +
+                fileHeader.size.toLong() +
+                fileData.size.toLong() +
+                fileTrailer.size.toLong() +
+                closing.size.toLong()
+
+        fun writeTo(out: OutputStream) {
+            formHeaders.forEach { out.write(it) }
+            out.write(fileHeader)
+            out.write(fileData)
+            out.write(fileTrailer)
+            out.write(closing)
+        }
+    }
+
+    private fun buildMultipartParts(
         boundary: String,
         formFields: Map<String, String>,
-        fileField: Pair<String, Pair<String, ByteArray>>
-    ): ByteArray {
-        val outputStream = ByteArrayOutputStream()
-        val writer = outputStream.bufferedWriter()
-
-        // Write form fields
-        formFields.forEach { (name, value) ->
-            writer.write("--$boundary\r\n")
-            writer.write("Content-Disposition: form-data; name=\"$name\"\r\n\r\n")
-            writer.write("$value\r\n")
+        fileFieldName: String,
+        fileName: String,
+        fileData: ByteArray,
+    ): MultipartParts {
+        val formHeaders = formFields.map { (name, value) ->
+            ("--$boundary\r\n" +
+                "Content-Disposition: form-data; name=\"$name\"\r\n\r\n" +
+                "$value\r\n").toByteArray(Charsets.UTF_8)
         }
-
-        // Write file field
-        val (fileName, fileData) = fileField.second
-        writer.write("--$boundary\r\n")
-        writer.write("Content-Disposition: form-data; name=\"${fileField.first}\"; filename=\"$fileName\"\r\n")
-        writer.write("Content-Type: application/gzip\r\n\r\n")
-        writer.flush()
-        outputStream.write(fileData)
-        writer.write("\r\n")
-        writer.write("--$boundary--\r\n")
-        writer.flush()
-
-        return outputStream.toByteArray()
+        val fileHeader = ("--$boundary\r\n" +
+            "Content-Disposition: form-data; name=\"$fileFieldName\"; filename=\"$fileName\"\r\n" +
+            "Content-Type: application/gzip\r\n\r\n").toByteArray(Charsets.UTF_8)
+        val fileTrailer = "\r\n".toByteArray(Charsets.UTF_8)
+        val closing = "--$boundary--\r\n".toByteArray(Charsets.UTF_8)
+        return MultipartParts(formHeaders, fileHeader, fileData, fileTrailer, closing)
     }
 
     fun sendImages(
@@ -427,16 +454,19 @@ object NetworkManager {
             var request: HttpURLConnection? = null
             try {
                 val boundary = "Boundary-${UUID.randomUUID()}"
-                val requestBody = buildMultipartBody(
-                    boundary,
+                val parts = buildMultipartParts(
+                    boundary = boundary,
                     formFields = mapOf("projectKey" to projectKey),
-                    fileField = "batch" to Pair(name, images)
+                    fileFieldName = "batch",
+                    fileName = name,
+                    fileData = images,
                 )
 
                 request = createRequest(
                     method = "POST",
                     path = IMAGES_URL,
-                    body = requestBody,
+                    contentLength = parts.contentLength,
+                    bodyWriter = { os -> parts.writeTo(os) },
                     headers = mapOf(
                         "Authorization" to "Bearer $token",
                         "Content-Type" to "multipart/form-data; boundary=$boundary"
