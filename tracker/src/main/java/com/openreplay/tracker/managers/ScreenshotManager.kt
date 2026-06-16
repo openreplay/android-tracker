@@ -39,6 +39,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.lang.ref.WeakReference
+import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.suspendCoroutine
 
@@ -62,7 +63,9 @@ object ScreenshotManager {
 
     // Names of archives currently queued/uploading, so overlapping send passes
     // don't re-dispatch (and re-stream) the same file before it's confirmed sent.
-    private val inFlightArchives: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    // ConcurrentHashMap.newKeySet() is API 24+, but minSdk is 21 — use newSetFromMap.
+    private val inFlightArchives: MutableSet<String> =
+        Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
 
     fun setSettings(settings: Triple<Int, Int, Int>) {
         val (_, quality, resolution) = settings
