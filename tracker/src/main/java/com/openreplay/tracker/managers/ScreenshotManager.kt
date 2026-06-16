@@ -35,11 +35,11 @@ import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream
-import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.lang.ref.WeakReference
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.suspendCoroutine
 
 object ScreenshotManager {
@@ -59,6 +59,10 @@ object ScreenshotManager {
         DebugUtils.error(throwable)
     })
     private val archiveMutex = Mutex()
+
+    // Names of archives currently queued/uploading, so overlapping send passes
+    // don't re-dispatch (and re-stream) the same file before it's confirmed sent.
+    private val inFlightArchives: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     fun setSettings(settings: Triple<Int, Int, Int>) {
         val (_, quality, resolution) = settings
@@ -113,7 +117,11 @@ object ScreenshotManager {
 
     private suspend fun sendScreenshotArchives() = withContext(Dispatchers.IO) {
         try {
-            val archives = getArchiveFolder().listFiles().orEmpty()
+            // Only finished archives: in-progress writes use a .tmp suffix and are
+            // renamed into place atomically once complete (see archivateFolder).
+            val archives = getArchiveFolder()
+                .listFiles { f -> f.isFile && f.name.endsWith(".tar.gz") }
+                .orEmpty()
             if (archives.isEmpty()) return@withContext
 
             val projectKey = OpenReplay.projectKey
@@ -121,17 +129,22 @@ object ScreenshotManager {
                 DebugUtils.error("Project key is null, cannot send screenshot archives")
                 return@withContext
             }
-            
+
             archives.forEach { archive ->
+                // Skip archives already queued/uploading from a previous interval —
+                // re-dispatching them causes duplicate uploads and re-reads under backoff.
+                if (!inFlightArchives.add(archive.name)) return@forEach
+
                 NetworkManager.sendImages(
                     projectKey = projectKey,
-                    images = archive.readBytes(),
+                    images = archive,
                     name = archive.name
                 ) { success ->
                     scope.launch {
                         if (success) {
                             archive.deleteSafely()
                         }
+                        inFlightArchives.remove(archive.name)
                     }
                 }
             }
@@ -204,26 +217,36 @@ object ScreenshotManager {
             return
         }
 
-        // combine chunked data to zip
-        val combinedData = ByteArrayOutputStream()
-        GzipCompressorOutputStream(combinedData).use { gzos ->
-            TarArchiveOutputStream(gzos).use { tarOs ->
-                screenshots.forEach { jpeg ->
-                    lastTs = jpeg.nameWithoutExtension
-                    val filename = "${firstTs}_1_${jpeg.nameWithoutExtension}.jpeg"
-                    val readBytes = jpeg.readBytes()
-                    val tarEntry = TarArchiveEntry(filename)
-                    tarEntry.size = readBytes.size.toLong()
-                    tarOs.putArchiveEntry(tarEntry)
-                    ByteArrayInputStream(readBytes).copyTo(tarOs)
-                    tarOs.closeArchiveEntry()
-                }
-            }
-        }
+        lastTs = screenshots.last().nameWithoutExtension
         val archiveFolder = getArchiveFolder()
         val sessionId = NetworkManager.sessionId ?: "unknown"
         val archiveFile = File(archiveFolder, "$sessionId-$lastTs.tar.gz")
-        FileOutputStream(archiveFile).use { out -> out.write(combinedData.toByteArray()) }
+        // Write to a temp file, then rename into place atomically. sendScreenshotArchives()
+        // runs concurrently and streams whatever finished archives it finds; if it picked
+        // this file up mid-write the streamed bytes wouldn't match the declared length.
+        val tmpFile = File(archiveFolder, "$sessionId-$lastTs.tar.gz.tmp")
+
+        // Stream each screenshot from disk straight into the gzip/tar output file;
+        // never buffer the whole archive in memory.
+        FileOutputStream(tmpFile).use { fos ->
+            GzipCompressorOutputStream(fos).use { gzos ->
+                TarArchiveOutputStream(gzos).use { tarOs ->
+                    screenshots.forEach { jpeg ->
+                        val filename = "${firstTs}_1_${jpeg.nameWithoutExtension}.jpeg"
+                        val tarEntry = TarArchiveEntry(jpeg, filename)
+                        tarOs.putArchiveEntry(tarEntry)
+                        jpeg.inputStream().use { it.copyTo(tarOs) }
+                        tarOs.closeArchiveEntry()
+                    }
+                }
+            }
+        }
+
+        if (!tmpFile.renameTo(archiveFile)) {
+            DebugUtils.error("Failed to finalize archive ${archiveFile.name}")
+            tmpFile.deleteSafely()
+            return
+        }
 
         screenshots.forEach { it.deleteSafely() }
     }

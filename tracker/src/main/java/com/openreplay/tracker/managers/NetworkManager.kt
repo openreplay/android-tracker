@@ -403,21 +403,26 @@ object NetworkManager {
     private data class MultipartParts(
         val formHeaders: List<ByteArray>,
         val fileHeader: ByteArray,
-        val fileData: ByteArray,
+        val file: File,
         val fileTrailer: ByteArray,
         val closing: ByteArray,
     ) {
+        // Capture the length once so it matches what writeTo() streams below; the
+        // archive file is immutable once created, so this stays consistent.
+        private val fileLength: Long = file.length()
+
         val contentLength: Long =
             formHeaders.sumOf { it.size.toLong() } +
                 fileHeader.size.toLong() +
-                fileData.size.toLong() +
+                fileLength +
                 fileTrailer.size.toLong() +
                 closing.size.toLong()
 
         fun writeTo(out: OutputStream) {
             formHeaders.forEach { out.write(it) }
             out.write(fileHeader)
-            out.write(fileData)
+            // Stream the archive straight from disk; never hold it fully in memory.
+            file.inputStream().use { it.copyTo(out) }
             out.write(fileTrailer)
             out.write(closing)
         }
@@ -428,7 +433,7 @@ object NetworkManager {
         formFields: Map<String, String>,
         fileFieldName: String,
         fileName: String,
-        fileData: ByteArray,
+        file: File,
     ): MultipartParts {
         val formHeaders = formFields.map { (name, value) ->
             ("--$boundary\r\n" +
@@ -440,12 +445,12 @@ object NetworkManager {
             "Content-Type: application/gzip\r\n\r\n").toByteArray(Charsets.UTF_8)
         val fileTrailer = "\r\n".toByteArray(Charsets.UTF_8)
         val closing = "--$boundary--\r\n".toByteArray(Charsets.UTF_8)
-        return MultipartParts(formHeaders, fileHeader, fileData, fileTrailer, closing)
+        return MultipartParts(formHeaders, fileHeader, file, fileTrailer, closing)
     }
 
     fun sendImages(
         projectKey: String,
-        images: ByteArray,
+        images: File,
         name: String,
         completion: (Boolean) -> Unit
     ) {
@@ -475,7 +480,7 @@ object NetworkManager {
                         formFields = mapOf("projectKey" to projectKey),
                         fileFieldName = "batch",
                         fileName = name,
-                        fileData = images,
+                        file = images,
                     )
 
                     request = createRequest(
