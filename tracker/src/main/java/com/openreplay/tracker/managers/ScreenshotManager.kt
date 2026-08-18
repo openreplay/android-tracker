@@ -41,6 +41,7 @@ import java.io.FileOutputStream
 import java.lang.ref.WeakReference
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.suspendCoroutine
 
 object ScreenshotManager {
@@ -67,10 +68,35 @@ object ScreenshotManager {
     private val inFlightArchives: MutableSet<String> =
         Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
 
+    // The first saved frame of a session claims firstTs (the session start timestamp)
+    // as its filename, so the replay has an image at t=0 instead of a blank gap
+    // until the first post-/start capture lands.
+    private val firstFrameCaptured = AtomicBoolean(false)
+
     fun setSettings(settings: Triple<Int, Int, Int>) {
         val (_, quality, resolution) = settings
         this.quality = quality
         this.minResolution = resolution
+    }
+
+    fun hasFirstFrame(): Boolean = firstFrameCaptured.get()
+
+    fun captureFirstFrame(context: Context, startTs: Long) {
+        uiContext = WeakReference(context)
+        firstTs = startTs.toString()
+        firstFrameCaptured.set(false)
+        scope.launch {
+            // Drop leftovers from a previous run that never got archived — they
+            // carry pre-session timestamps and would pollute this session's replay.
+            runCatching { getScreenshotFolder().listFiles()?.forEach { it.delete() } }
+            makeScreenshotAndSaveWithArchive()
+        }
+    }
+
+    fun retryFirstFrameCapture(startTs: Long) {
+        if (!::uiContext.isInitialized) return
+        firstTs = startTs.toString()
+        scope.launch { makeScreenshotAndSaveWithArchive() }
     }
 
     fun start(context: Context, startTs: Long) {
@@ -161,9 +187,17 @@ object ScreenshotManager {
             try {
                 checkAndReportOrientationChange()
                 val screenShotBitmap = withContext(Dispatchers.Main) { captureScreenshot() }
+                val imageData = compress(screenShotBitmap)
                 val screenShotFolder = getScreenshotFolder()
-                val screenShotFile = File(screenShotFolder, "${System.currentTimeMillis()}.jpeg")
-                FileOutputStream(screenShotFile).use { out -> out.write(compress(screenShotBitmap)) }
+                // Claim the name only after capture+compress succeeded, so a failed
+                // capture doesn't consume the session-start slot.
+                val frameTs = if (firstFrameCaptured.compareAndSet(false, true)) {
+                    firstTs
+                } else {
+                    System.currentTimeMillis().toString()
+                }
+                val screenShotFile = File(screenShotFolder, "$frameTs.jpeg")
+                FileOutputStream(screenShotFile).use { out -> out.write(imageData) }
                 archiveMutex.withLock {
                     if (screenShotFolder.listFiles().orEmpty().size >= chunk) {
                         archivateFolder(folder = screenShotFolder)
@@ -213,7 +247,10 @@ object ScreenshotManager {
 
 
     private fun archivateFolder(folder: File) { 
-        val screenshots = folder.listFiles().orEmpty().sortedBy { it.lastModified() }
+        // Sort by the timestamp encoded in the filename, not lastModified: the
+        // session-start frame is named with an earlier ts than its write time.
+        val screenshots = folder.listFiles().orEmpty()
+            .sortedBy { it.nameWithoutExtension.toLongOrNull() ?: Long.MAX_VALUE }
         
         if (screenshots.isEmpty()) {
             DebugUtils.log("No screenshots to archive")

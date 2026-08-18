@@ -179,6 +179,17 @@ object OpenReplay {
             }
             
             sessionStartTs = Date().time
+            if (options.screen) {
+                ScreenshotManager.setSettings(
+                    settings = getCaptureSettings(
+                        fps = 1,
+                        quality = options.screenshotQuality
+                    )
+                )
+                // Capture the first frame at the session start instant, before the
+                // /start round trip, so the replay isn't blank until the response.
+                ScreenshotManager.captureFirstFrame(context, sessionStartTs)
+            }
             val activityContext = lifecycleManager?.currentActivity
             SessionRequest.create(context, activityContext, false) { sessionResponse ->
                 if (sessionResponse == null) {
@@ -228,6 +239,15 @@ object OpenReplay {
         this.projectKey = projectKey
         this.bufferingMode = true
         sessionStartTs = Date().time
+        if (options.screen) {
+            ScreenshotManager.setSettings(
+                settings = getCaptureSettings(
+                    fps = 1,
+                    quality = options.screenshotQuality
+                )
+            )
+            ScreenshotManager.captureFirstFrame(appContext, sessionStartTs)
+        }
 
         // Initialize LifecycleManager immediately to capture current activity
         if (this.lifecycleManager == null) {

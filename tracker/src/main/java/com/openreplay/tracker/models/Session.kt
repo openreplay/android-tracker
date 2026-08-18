@@ -13,6 +13,7 @@ import kotlin.math.abs
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import com.openreplay.tracker.managers.NetworkManager
+import com.openreplay.tracker.managers.ScreenshotManager
 import com.openreplay.tracker.listeners.PerformanceListener
 
 object SessionRequest {
@@ -63,7 +64,9 @@ object SessionRequest {
         val resolution = getDeviceResolution(activityContext ?: context)
         val deviceModel = Build.DEVICE ?: "Unknown"
         val deviceType = if (isTablet(context)) "tablet" else "mobile"
-        val timestamp = Date().time
+        // Use the same instant the tracker stamped as session start (and used for the
+        // first frame's filename), so the replay's t=0 matches the first screenshot.
+        val timestamp = OpenReplay.sessionStartTs.takeIf { it > 0 } ?: Date().time
         val performances = PerformanceListener.getAllPerformanceMetrics(context)
 
         synchronized(params) {
@@ -155,6 +158,7 @@ object SessionRequest {
                     }
                     
                     retryHandler?.postDelayed({
+                        refreshTimestampIfNoFirstFrame()
                         callAPI(completion)
                     }, RETRY_DELAY_MS)
                 }
@@ -165,6 +169,19 @@ object SessionRequest {
                 }
             }
         }
+    }
+
+    // If no screenshot has been captured yet, move the session start timestamp
+    // forward on each retry and re-attempt the capture, so the session start stays
+    // aligned with the first frame that eventually succeeds.
+    private fun refreshTimestampIfNoFirstFrame() {
+        if (!OpenReplay.options.screen || ScreenshotManager.hasFirstFrame()) return
+        val newTs = Date().time
+        OpenReplay.sessionStartTs = newTs
+        synchronized(params) {
+            if (params.isNotEmpty()) params["timestamp"] = newTs
+        }
+        ScreenshotManager.retryFirstFrameCapture(newTs)
     }
 
     fun getSessionId(): String? = sessionId.get()
