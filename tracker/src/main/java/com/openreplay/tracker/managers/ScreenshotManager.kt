@@ -43,6 +43,7 @@ import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.suspendCoroutine
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 object ScreenshotManager {
     private var lastTs: String = ""
@@ -72,6 +73,16 @@ object ScreenshotManager {
     // as its filename, so the replay has an image at t=0 instead of a blank gap
     // until the first post-/start capture lands.
     private val firstFrameCaptured = AtomicBoolean(false)
+
+    // Cap on archives handed to the uploader at any one time. Matches its upload
+    // concurrency, so a backlog drains steadily instead of piling into the upload queue:
+    // a send pass runs every second, and under backoff each queued upload sleeps for up
+    // to 30s, so an unbounded per-pass dispatch would queue the whole backlog anyway.
+    private const val MAX_ARCHIVES_IN_FLIGHT = 2
+
+    // "<sessionId>-<lastTs>.tar.gz" -> lastTs, for oldest-first ordering.
+    private fun archiveTimestamp(name: String): Long =
+        name.removeSuffix(".tar.gz").substringAfterLast('-').toLongOrNull() ?: Long.MAX_VALUE
 
     fun setSettings(settings: Triple<Int, Int, Int>) {
         val (_, quality, resolution) = settings
@@ -159,7 +170,20 @@ object ScreenshotManager {
                 return@withContext
             }
 
-            archives.forEach { archive ->
+            // Hand the uploader only as much as it can actually work on, oldest first.
+            // Dispatching the whole backlog at once (which pause() used to do, right as
+            // the network was going away) queues every archive behind the upload
+            // semaphore, so the app returns to the foreground with a saturated queue and
+            // new frames stuck behind minutes of stale, already-failing attempts.
+            val freeSlots = MAX_ARCHIVES_IN_FLIGHT - inFlightArchives.size
+            if (freeSlots <= 0) return@withContext
+
+            val batch = archives
+                .filterNot { it.name in inFlightArchives }
+                .sortedBy { archiveTimestamp(it.name) }
+                .take(freeSlots)
+
+            batch.forEach { archive ->
                 // Skip archives already queued/uploading from a previous interval —
                 // re-dispatching them causes duplicate uploads and re-reads under backoff.
                 if (!inFlightArchives.add(archive.name)) return@forEach
@@ -306,22 +330,26 @@ object ScreenshotManager {
         if (activity == null) {
             throw IllegalStateException("No Activity available for screenshot")
         }
-        
+
         if (activity.isFinishing || activity.isDestroyed) {
             throw IllegalStateException("Activity is finishing or destroyed")
         }
-        
-        return suspendCoroutine { coroutine ->
+
+        // suspendCancellableCoroutine, and screenShot() reports every outcome: a capture
+        // that silently dropped its callback (PixelCopy on a window with no backing
+        // surface, which happens on every return from background) used to suspend this
+        // coroutine forever, uncancellably.
+        return suspendCancellableCoroutine { coroutine ->
             try {
-                activity.screenShot { shot ->
-                    if (!coroutine.context.isActive) {
-                        shot.recycle()
+                activity.screenShot { outcome ->
+                    if (!coroutine.isActive) {
+                        outcome.getOrNull()?.recycle()
                         return@screenShot
                     }
-                    coroutine.resumeWith(Result.success(shot))
+                    coroutine.resumeWith(outcome)
                 }
             } catch (e: Exception) {
-                coroutine.resumeWith(Result.failure(e))
+                if (coroutine.isActive) coroutine.resumeWith(Result.failure(e))
             }
         }
     }
@@ -574,20 +602,35 @@ object ScreenshotManager {
         }
     }
 
-    private fun Activity.screenShot(result: (Bitmap) -> Unit) {
+    /**
+     * Captures the window and hands back exactly one [Result] on every path — including
+     * the failure paths. A caller suspended on this callback must always be resumed.
+     */
+    private fun Activity.screenShot(result: (Result<Bitmap>) -> Unit) {
         val activity = this
-        
+        val deliver = AtomicBoolean(false)
+        val once: (Result<Bitmap>) -> Unit = { outcome ->
+            if (deliver.compareAndSet(false, true)) {
+                result(outcome)
+            } else {
+                outcome.getOrNull()?.recycle()
+            }
+        }
+        val fail: (String) -> Unit = { reason -> once(Result.failure(IllegalStateException(reason))) }
+
         if (activity.isFinishing || activity.isDestroyed) {
             DebugUtils.log("Activity is finishing or destroyed, skipping screenshot")
+            fail("Activity is finishing or destroyed")
             return
         }
-        
+
         val view = window?.decorView?.rootView
         if (view == null || view.width <= 0 || view.height <= 0) {
             DebugUtils.error("Invalid view for screenshot")
+            fail("Invalid view for screenshot")
             return
         }
-        
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val displayMetrics = resources.displayMetrics
             val bitmap = Bitmap.createBitmap(
@@ -606,26 +649,28 @@ object ScreenshotManager {
                     bitmap, { copyResult ->
                         if (activity.isFinishing || activity.isDestroyed) {
                             bitmap.recycle()
+                            fail("Activity is finishing or destroyed")
                             return@request
                         }
-                        
+
                         when (copyResult) {
                             PixelCopy.SUCCESS -> {
                                 try {
                                     val maskedBitmap = applyMaskToScreenshot(bitmap, view)
-                                    result(maskedBitmap)
+                                    once(Result.success(maskedBitmap))
                                 } catch (e: Exception) {
                                     DebugUtils.error("Failed to apply mask: ${e.message}")
-                                    result(bitmap)
+                                    once(Result.success(bitmap))
                                 }
                             }
                             else -> {
                                 DebugUtils.error("PixelCopy failed with result: $copyResult, falling back to oldViewToBitmap")
                                 bitmap.recycle()
                                 try {
-                                    result(oldViewToBitmap(view))
+                                    once(Result.success(oldViewToBitmap(view)))
                                 } catch (e: Exception) {
                                     DebugUtils.error("Fallback screenshot failed: ${e.message}")
+                                    once(Result.failure(e))
                                 }
                             }
                         }
@@ -633,14 +678,18 @@ object ScreenshotManager {
                     mainHandler!!
                 )
             } catch (e: Exception) {
-                DebugUtils.error("PixelCopy request failed: ${e.message}")
+                // Typically "Window doesn't have a backing surface!" — the window has no
+                // surface yet on the first capture after returning from background.
+                DebugUtils.log("PixelCopy request failed: ${e.message}")
                 bitmap.recycle()
+                once(Result.failure(e))
             }
         } else {
             try {
-                result(oldViewToBitmap(view))
+                once(Result.success(oldViewToBitmap(view)))
             } catch (e: Exception) {
                 DebugUtils.error("Screenshot failed: ${e.message}")
+                once(Result.failure(e))
             }
         }
     }

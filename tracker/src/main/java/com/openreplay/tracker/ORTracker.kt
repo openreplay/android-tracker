@@ -398,6 +398,11 @@ object OpenReplay {
                 return
             }
             
+            // Drop any image-upload throttle built up while the app was backgrounded:
+            // those failures were the transport going away, not the server pushing back,
+            // and keeping the delay stalls screenshot uploads for minutes after resume.
+            NetworkManager.resetImageBackoff()
+
             // Resume message collector
             MessageCollector.resume()
             

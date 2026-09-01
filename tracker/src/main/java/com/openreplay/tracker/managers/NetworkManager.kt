@@ -21,7 +21,6 @@ import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.GZIPOutputStream
 
 object NetworkManager {
@@ -42,9 +41,10 @@ object NetworkManager {
 
     private val networkScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val imageUploadSemaphore = Semaphore(IMAGE_UPLOAD_MAX_CONCURRENCY)
-    private val consecutiveImageFailures = AtomicInteger(0)
-    @Volatile
-    private var imageBackoffUntilMs = 0L
+    private val imageBackoff = ImageUploadBackoff(
+        baseMs = IMAGE_BACKOFF_BASE_MS,
+        capMs = IMAGE_BACKOFF_CAP_MS,
+    )
 
     var baseUrl = "https://api.openreplay.com/ingest"
 
@@ -455,71 +455,101 @@ object NetworkManager {
         completion: (Boolean) -> Unit
     ) {
         networkScope.launch {
-            val token = this@NetworkManager.token ?: run {
-                DebugUtils.error("No token available for sendImages.")
-                withContext(Dispatchers.Main) { completion(false) }
-                return@launch
+            // The caller caps how many archives are in flight and only frees a slot when
+            // this callback fires, so it must fire on every path — cancellation included.
+            var reported = false
+            val report: suspend (Boolean) -> Unit = { success ->
+                reported = true
+                withContext(NonCancellable + Dispatchers.Main) { completion(success) }
             }
 
-            if (!isNetworkAvailable()) {
-                DebugUtils.error("No network connection available for sendImages")
-                withContext(Dispatchers.Main) { completion(false) }
-                return@launch
-            }
+            try {
+                val token = this@NetworkManager.token ?: run {
+                    DebugUtils.error("No token available for sendImages.")
+                    report(false)
+                    return@launch
+                }
 
-            imageUploadSemaphore.withPermit {
-                val waitMs = imageBackoffUntilMs - System.currentTimeMillis()
+                if (!isNetworkAvailable()) {
+                    DebugUtils.error("No network connection available for sendImages")
+                    report(false)
+                    return@launch
+                }
+
+                // Wait out the shared backoff *before* taking a permit: a sleeping upload
+                // must not occupy one of the two concurrency slots, or a burst of queued
+                // archives serialises into one upload per backoff interval.
+                val waitMs = imageBackoff.waitMsFrom(System.currentTimeMillis())
                 if (waitMs > 0) delay(waitMs)
 
-                var success = false
-                var request: HttpURLConnection? = null
-                try {
-                    val boundary = "Boundary-${UUID.randomUUID()}"
-                    val parts = buildMultipartParts(
-                        boundary = boundary,
-                        formFields = mapOf("projectKey" to projectKey),
-                        fileFieldName = "batch",
-                        fileName = name,
-                        file = images,
-                    )
-
-                    request = createRequest(
-                        method = "POST",
-                        path = IMAGES_URL,
-                        contentLength = parts.contentLength,
-                        bodyWriter = { os -> parts.writeTo(os) },
-                        headers = mapOf(
-                            "Authorization" to "Bearer $token",
-                            "Content-Type" to "multipart/form-data; boundary=$boundary"
+                imageUploadSemaphore.withPermit {
+                    var success = false
+                    var request: HttpURLConnection? = null
+                    try {
+                        val boundary = "Boundary-${UUID.randomUUID()}"
+                        val parts = buildMultipartParts(
+                            boundary = boundary,
+                            formFields = mapOf("projectKey" to projectKey),
+                            fileFieldName = "batch",
+                            fileName = name,
+                            file = images,
                         )
-                    )
 
-                    val responseCode = request.responseCode
-                    if (responseCode in 200..299) {
-                        success = true
-                        DebugUtils.log("Images sent successfully")
-                    } else {
-                        val errorBody = readErrorStream(request)
-                        DebugUtils.error("Failed to send images: $responseCode - $errorBody")
+                        request = createRequest(
+                            method = "POST",
+                            path = IMAGES_URL,
+                            contentLength = parts.contentLength,
+                            bodyWriter = { os -> parts.writeTo(os) },
+                            headers = mapOf(
+                                "Authorization" to "Bearer $token",
+                                "Content-Type" to "multipart/form-data; boundary=$boundary"
+                            )
+                        )
+
+                        val responseCode = request.responseCode
+                        if (responseCode in 200..299) {
+                            success = true
+                            DebugUtils.log("Images sent successfully")
+                        } else {
+                            val errorBody = readErrorStream(request)
+                            DebugUtils.error("Failed to send images: $responseCode - $errorBody")
+                        }
+                    } catch (e: Exception) {
+                        DebugUtils.error("Error sending images: ${e.message}")
+                    } finally {
+                        request?.disconnect()
+                        if (success) {
+                            imageBackoff.onSuccess()
+                        } else {
+                            val online = isNetworkAvailable()
+                            val backoff = imageBackoff.onFailure(System.currentTimeMillis(), online)
+                            if (online) {
+                                DebugUtils.log(
+                                    "Image upload backoff ${backoff}ms after " +
+                                        "${imageBackoff.failureCount()} consecutive failure(s)"
+                                )
+                            } else {
+                                DebugUtils.log("Image upload failed while offline; backoff left unchanged")
+                            }
+                        }
+                        report(success)
                     }
-                } catch (e: Exception) {
-                    DebugUtils.error("Error sending images: ${e.message}")
-                } finally {
-                    request?.disconnect()
-                    if (success) {
-                        consecutiveImageFailures.set(0)
-                        imageBackoffUntilMs = 0L
-                    } else {
-                        val n = consecutiveImageFailures.incrementAndGet()
-                        val shift = (n - 1).coerceIn(0, 5)
-                        val backoff = (IMAGE_BACKOFF_BASE_MS shl shift).coerceAtMost(IMAGE_BACKOFF_CAP_MS)
-                        imageBackoffUntilMs = System.currentTimeMillis() + backoff
-                        DebugUtils.log("Image upload backoff ${backoff}ms after $n consecutive failure(s)")
-                    }
-                    withContext(Dispatchers.Main) { completion(success) }
+                }
+            } finally {
+                if (!reported) {
+                    withContext(NonCancellable + Dispatchers.Main) { completion(false) }
                 }
             }
         }
+    }
+
+    /**
+     * Drop any image-upload throttle accumulated while the app was away. Failures that
+     * piled up in the background say nothing about server health, and carrying that
+     * delay into the foreground stalls screenshot uploads on resume.
+     */
+    fun resetImageBackoff() {
+        imageBackoff.reset()
     }
 
     /**
