@@ -60,7 +60,7 @@ OROptions(
     analytics = true,      // Track user interactions
     screen = true,         // Capture screenshots
     logs = true,           // Capture logs
-    wifiOnly = false,      // Send over cellular too
+    wifiOnly = false,      // Default; set true to record on WiFi only
     debugLogs = true       // Enable debug logging
 )
 ```

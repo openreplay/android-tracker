@@ -207,5 +207,8 @@ data class SessionResponse(
     val sessionID: String,
     val fps: Int,
     val quality: String,
-    val projectID: String
+    val projectID: String,
+    // Server >= v1.26 returns true: screenshots go as a length-prefixed binary
+    // frames stream instead of a tar of jpegs. Absent/false = legacy tar.
+    val framesSupport: Boolean? = null
 ) : Serializable

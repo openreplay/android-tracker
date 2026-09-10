@@ -50,6 +50,11 @@ object NetworkManager {
 
     @Volatile
     var sessionId: String? = null
+    // From the /start response; selects the screenshot batch format and the
+    // `type=frames` form field on /images. Reset on every new session.
+    @Volatile
+    var framesSupport: Boolean = false
+        private set
 
     @Volatile
     var projectId: String? = null
@@ -198,6 +203,7 @@ object NetworkManager {
                     token = sessionResponse.token
                     sessionId = sessionResponse.sessionID
                     projectId = sessionResponse.projectID
+                    framesSupport = sessionResponse.framesSupport ?: false
 
                     // Save token for late messages
                     token?.let { UserDefaults.lastToken = it }
@@ -487,9 +493,16 @@ object NetworkManager {
                     var request: HttpURLConnection? = null
                     try {
                         val boundary = "Boundary-${UUID.randomUUID()}"
+                        // Server sees type=frames -> parses the batch as the
+                        // length-prefixed binary stream; absent -> tar-of-jpegs.
+                        val formFields = if (framesSupport) {
+                            mapOf("projectKey" to projectKey, "type" to "frames")
+                        } else {
+                            mapOf("projectKey" to projectKey)
+                        }
                         val parts = buildMultipartParts(
                             boundary = boundary,
-                            formFields = mapOf("projectKey" to projectKey),
+                            formFields = formFields,
                             fileFieldName = "batch",
                             fileName = name,
                             file = images,

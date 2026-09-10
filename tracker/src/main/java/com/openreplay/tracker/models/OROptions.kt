@@ -16,7 +16,7 @@ enum class RecordingQuality {
  * @property performances Enable/disable performance monitoring (CPU, memory, battery) (default: true)
  * @property logs Enable/disable log capture (default: false)
  * @property screen Enable/disable screen recording (default: true)
- * @property wifiOnly Only track when connected to WiFi (default: true)
+ * @property wifiOnly Only track when connected to WiFi (default: false — records on WiFi and cellular)
  * @property debugLogs Enable/disable debug logging (default: false)
  * @property debugImages Enable/disable debug image logging (default: false)
  * @property fps Frames per second for screen recording (default: 1, must be > 0)
@@ -30,7 +30,7 @@ data class OROptions(
     val performances: Boolean = true,
     val logs: Boolean = false,
     val screen: Boolean = true,
-    val wifiOnly: Boolean = true,
+    val wifiOnly: Boolean = false,
     val debugLogs: Boolean = false,
     val debugImages: Boolean = false,
     val fps: Int = 1,
@@ -78,7 +78,7 @@ data class OROptions(
         private var performances: Boolean = true
         private var logs: Boolean = false
         private var screen: Boolean = true
-        private var wifiOnly: Boolean = true
+        private var wifiOnly: Boolean = false
         private var debugLogs: Boolean = false
         private var debugImages: Boolean = false
         private var fps: Int = 1

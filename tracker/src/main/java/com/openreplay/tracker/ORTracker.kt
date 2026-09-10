@@ -601,9 +601,10 @@ fun getCaptureSettings(fps: Int, quality: RecordingQuality): Triple<Int, Int, In
     val limitedFPS = min(max(fps, 1), 99)
     val captureRate = 1000 / limitedFPS // Milliseconds per frame
 
+    // JPEG quality, aligned with the iOS tracker (0.4 / 0.5 / 0.6).
     val imgCompression = when (quality) {
-        RecordingQuality.Low -> 10
-        RecordingQuality.Standard -> 30
+        RecordingQuality.Low -> 40
+        RecordingQuality.Standard -> 50
         RecordingQuality.High -> 60
     }
     val imgResolution = when (quality) {

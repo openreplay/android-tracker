@@ -38,6 +38,7 @@ import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.util.zip.GZIPOutputStream
 import java.lang.ref.WeakReference
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
@@ -79,10 +80,6 @@ object ScreenshotManager {
     // a send pass runs every second, and under backoff each queued upload sleeps for up
     // to 30s, so an unbounded per-pass dispatch would queue the whole backlog anyway.
     private const val MAX_ARCHIVES_IN_FLIGHT = 2
-
-    // "<sessionId>-<lastTs>.tar.gz" -> lastTs, for oldest-first ordering.
-    private fun archiveTimestamp(name: String): Long =
-        name.removeSuffix(".tar.gz").substringAfterLast('-').toLongOrNull() ?: Long.MAX_VALUE
 
     fun setSettings(settings: Triple<Int, Int, Int>) {
         val (_, quality, resolution) = settings
@@ -160,7 +157,7 @@ object ScreenshotManager {
             // Only finished archives: in-progress writes use a .tmp suffix and are
             // renamed into place atomically once complete (see archivateFolder).
             val archives = getArchiveFolder()
-                .listFiles { f -> f.isFile && f.name.endsWith(".tar.gz") }
+                .listFiles { f -> f.isFile && ScreenshotArchiveFormat.isFinishedArchive(f.name) }
                 .orEmpty()
             if (archives.isEmpty()) return@withContext
 
@@ -180,7 +177,7 @@ object ScreenshotManager {
 
             val batch = archives
                 .filterNot { it.name in inFlightArchives }
-                .sortedBy { archiveTimestamp(it.name) }
+                .sortedBy { ScreenshotArchiveFormat.archiveTimestamp(it.name) }
                 .take(freeSlots)
 
             batch.forEach { archive ->
@@ -284,25 +281,22 @@ object ScreenshotManager {
         lastTs = screenshots.last().nameWithoutExtension
         val archiveFolder = getArchiveFolder()
         val sessionId = NetworkManager.sessionId ?: "unknown"
-        val archiveFile = File(archiveFolder, "$sessionId-$lastTs.tar.gz")
+        // Format is fixed per session by the /start response; the upload side adds the
+        // matching `type=frames` form field from the same flag.
+        val frames = NetworkManager.framesSupport
+        val archiveFile = File(archiveFolder, ScreenshotArchiveFormat.archiveName(sessionId, lastTs, frames))
         // Write to a temp file, then rename into place atomically. sendScreenshotArchives()
         // runs concurrently and streams whatever finished archives it finds; if it picked
         // this file up mid-write the streamed bytes wouldn't match the declared length.
-        val tmpFile = File(archiveFolder, "$sessionId-$lastTs.tar.gz.tmp")
+        val tmpFile = File(archiveFolder, ScreenshotArchiveFormat.tmpName(archiveFile.name))
 
-        // Stream each screenshot from disk straight into the gzip/tar output file;
+        // Stream each screenshot from disk straight into the gzip output file;
         // never buffer the whole archive in memory.
         FileOutputStream(tmpFile).use { fos ->
-            GzipCompressorOutputStream(fos).use { gzos ->
-                TarArchiveOutputStream(gzos).use { tarOs ->
-                    screenshots.forEach { jpeg ->
-                        val filename = "${firstTs}_1_${jpeg.nameWithoutExtension}.jpeg"
-                        val tarEntry = TarArchiveEntry(jpeg, filename)
-                        tarOs.putArchiveEntry(tarEntry)
-                        jpeg.inputStream().use { it.copyTo(tarOs) }
-                        tarOs.closeArchiveEntry()
-                    }
-                }
+            if (frames) {
+                writeFramesArchive(fos, screenshots)
+            } else {
+                writeTarArchive(fos, screenshots)
             }
         }
 
@@ -313,6 +307,31 @@ object ScreenshotManager {
         }
 
         screenshots.forEach { it.deleteSafely() }
+    }
+
+    // frames: [ts u64 LE][size u32 LE][jpeg] per screenshot, concatenated, gzipped.
+    private fun writeFramesArchive(fos: FileOutputStream, screenshots: List<File>) {
+        GZIPOutputStream(fos).use { gzos ->
+            screenshots.forEach { jpeg ->
+                val ts = jpeg.nameWithoutExtension.toLongOrNull() ?: return@forEach
+                ScreenshotArchiveFormat.writeFrameRecord(gzos, ts, jpeg.readBytes())
+            }
+        }
+    }
+
+    // tar: one "<firstTs>_1_<ts>.jpeg" entry per screenshot, gzipped.
+    private fun writeTarArchive(fos: FileOutputStream, screenshots: List<File>) {
+        GzipCompressorOutputStream(fos).use { gzos ->
+            TarArchiveOutputStream(gzos).use { tarOs ->
+                screenshots.forEach { jpeg ->
+                    val filename = "${firstTs}_1_${jpeg.nameWithoutExtension}.jpeg"
+                    val tarEntry = TarArchiveEntry(jpeg, filename)
+                    tarOs.putArchiveEntry(tarEntry)
+                    jpeg.inputStream().use { it.copyTo(tarOs) }
+                    tarOs.closeArchiveEntry()
+                }
+            }
+        }
     }
 
     private fun getArchiveFolder(): File {
@@ -580,11 +599,10 @@ object ScreenshotManager {
                 }
 
                 try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        updated.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, quality, outputStream)
-                    } else {
-                        updated.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
-                    }
+                    // Always JPEG: WEBP_LOSSLESS ignored `quality` and produced frames
+                    // several times larger than iOS's JPEGs; the server pipeline also
+                    // expects .jpeg payloads in both archive formats.
+                    updated.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
                     it.resumeWith(Result.success(outputStream.toByteArray()))
                 } finally {
                     // Recycle scaled bitmap to free memory (only if different from original)
