@@ -267,9 +267,9 @@ class ORMobileNetworkCall(
                 type,
                 method,
                 URL,
-                response,
                 request,
-                status,
+                response,
+                status.toULong(),
                 duration
             )
         )
@@ -353,7 +353,9 @@ fun fromValues(vararg values: Any?): ByteArray {
                 outputStream.write(stringBytes)
             }
             is ByteArray -> outputStream.write(value)
-            is Int -> outputStream.write(ByteBuffer.allocate(4).putInt(value).array())
+            // The wire protocol has no fixed-width integers: every numeric field is a varint (see messages.rb `uint`).
+            // A raw 4-byte Int would desync every field after it in the backend decoder.
+            is Int -> outputStream.write(uLongToByteArray(value.toULong()))
             is Float -> outputStream.write(ByteBuffer.allocate(4).putFloat(value).array())
             is Double -> outputStream.write(ByteBuffer.allocate(8).putDouble(value).array())
             else -> throw IllegalArgumentException("Unsupported type: ${value::class.java.simpleName}")
