@@ -12,6 +12,14 @@ import java.lang.ref.WeakReference
 import com.openreplay.tracker.managers.NetworkManager
 
 object Crash {
+    // Keeps reason + stacktrace comfortably under ORMobileCrash's wire-message budget
+    // (< 500 KB) even for a pathologically deep/huge stack trace, so a crash report is
+    // truncated rather than silently dropped by contentData()'s size guard.
+    private const val CRASH_FIELD_MAX_BYTES = 200_000
+
+    private fun capField(value: String): String =
+        cutStringToUtf8Bytes(value, CRASH_FIELD_MAX_BYTES)
+
     private var crashFile: File? = null
     @Volatile
     private var isActive = false
@@ -77,8 +85,8 @@ object Crash {
             
             val message = ORMobileCrash(
                 name = e.javaClass.name,
-                reason = e.message ?: e.localizedMessage ?: "Unknown error",
-                stacktrace = e.stackTraceToString()
+                reason = capField(e.message ?: e.localizedMessage ?: "Unknown error"),
+                stacktrace = capField(e.stackTraceToString())
             )
             val messageData = message.contentData()
 
@@ -112,8 +120,8 @@ object Crash {
     fun sendLateError(exception: Exception) {
         val message = ORMobileCrash(
             name = exception.javaClass.name,
-            reason = exception.message ?: exception.localizedMessage ?: "Unknown error",
-            stacktrace = exception.stackTraceToString()
+            reason = capField(exception.message ?: exception.localizedMessage ?: "Unknown error"),
+            stacktrace = capField(exception.stackTraceToString())
         )
 
         CoroutineScope(Dispatchers.IO).launch {

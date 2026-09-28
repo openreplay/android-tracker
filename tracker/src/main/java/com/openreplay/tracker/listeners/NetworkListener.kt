@@ -26,8 +26,12 @@ open class NetworkListener {
         "X-Auth-Token"
     )
 
-    // Maximum size for captured request/response bodies (1MB)
-    private val maxBodySize = 1024 * 1024
+    // Coarse pre-cut applied here to bound how much raw body we hold/serialize before
+    // NetworkPayloadLimiter.fit() (invoked once, in sendNetworkMessage) does the real,
+    // budget-accurate truncation on the final JSON. Deliberately larger than fit()'s
+    // MAX_PAYLOAD_BYTES so this only kicks in for genuinely huge bodies and fit() is
+    // left to do the real work (and own the truncation marker) in the common case.
+    private val preCutBytes = 1024 * 1024
 
     // Thread safety lock
     private val lock = Any()
@@ -50,7 +54,7 @@ open class NetworkListener {
         try {
             url = connection.url.toString()
             method = connection.requestMethod
-            
+
             // Capture request headers (these are the headers being sent)
             requestHeaders = connection.requestProperties.mapValues { entry ->
                 entry.value.joinToString("; ")
@@ -71,7 +75,7 @@ open class NetworkListener {
      */
     fun setRequestBody(body: String?) {
         synchronized(lock) {
-            this.requestBody = body?.take(maxBodySize)
+            this.requestBody = body?.let { cutStringToUtf8Bytes(it, preCutBytes) }
         }
     }
 
@@ -79,15 +83,13 @@ open class NetworkListener {
         synchronized(lock) {
             try {
                 val endTime = System.currentTimeMillis()
-                
-                // Limit response body size
-                val responseBody = if (data != null && data.size <= maxBodySize) {
-                    data.toString(StandardCharsets.UTF_8)
-                } else if (data != null && data.size > maxBodySize) {
-                    DebugUtils.log("Response body too large (${data.size} bytes), truncating")
-                    data.take(maxBodySize).toByteArray().toString(StandardCharsets.UTF_8) + "... [truncated]"
-                } else {
-                    null
+
+                // Coarse pre-cut only; NetworkPayloadLimiter.fit() (in sendNetworkMessage)
+                // does the final, budget-accurate truncation and owns the marker text.
+                val responseBody = when {
+                    data == null -> null
+                    data.size <= preCutBytes -> data.toString(StandardCharsets.UTF_8)
+                    else -> utf8SafeCut(data, preCutBytes).toString(StandardCharsets.UTF_8)
                 }
 
                 val requestContent = mapOf(
@@ -102,7 +104,7 @@ open class NetworkListener {
                     DebugUtils.error("Error reading response headers: ${e.message}")
                     emptyMap()
                 }
-                
+
                 val responseContent = mapOf(
                     "body" to sanitizeBody(responseBody),
                     "headers" to sanitizeHeaders(responseHeaders)
@@ -136,7 +138,7 @@ open class NetworkListener {
 
     private fun sanitizeBody(body: String?): String? {
         if (body.isNullOrBlank()) return body
-        
+
         try {
             var sanitizedBody = body
             ignoredKeys.forEach { key ->
@@ -165,6 +167,75 @@ open class NetworkListener {
     }
 }
 
+/**
+ * Cuts [data] to at most [maxBytes] without splitting a multi-byte UTF-8 sequence.
+ * Looks at the last byte that would be kept (index maxBytes - 1): walks back over up
+ * to 3 continuation bytes (0b10xxxxxx) to find that byte's sequence leader, then - if
+ * the leader's full sequence would extend past maxBytes - drops the whole sequence.
+ * Avoids boxing to a List<Byte> (no `.take()`) for a multi-MB array.
+ */
+internal fun utf8SafeCut(data: ByteArray, maxBytes: Int): ByteArray {
+    if (maxBytes >= data.size) return data
+    if (maxBytes <= 0) return ByteArray(0)
+
+    var i = maxBytes - 1
+    var stepsBack = 0
+    while (i > 0 && (data[i].toInt() and 0xC0) == 0x80 && stepsBack < 3) {
+        i--
+        stepsBack++
+    }
+
+    val leader = data[i].toInt() and 0xFF
+    val seqLen = when {
+        leader and 0x80 == 0x00 -> 1 // ASCII
+        leader and 0xE0 == 0xC0 -> 2
+        leader and 0xF0 == 0xE0 -> 3
+        leader and 0xF8 == 0xF0 -> 4
+        else -> 1 // stray/invalid continuation byte: treat as a single byte
+    }
+
+    val end = if (i + seqLen > maxBytes) i else maxBytes
+    return data.copyOf(end)
+}
+
+/** UTF-8-byte-safe cut of a String to at most [maxBytes] bytes (never chars), so a
+ *  surrogate pair or multi-byte character can't be split. */
+internal fun cutStringToUtf8Bytes(s: String, maxBytes: Int): String {
+    val bytes = s.toByteArray(StandardCharsets.UTF_8)
+    if (bytes.size <= maxBytes) return s
+    return utf8SafeCut(bytes, maxBytes).toString(StandardCharsets.UTF_8)
+}
+
+/**
+ * Builds the ORMobileNetworkCall message for a completed network call, fitting the
+ * request/response JSON to the wire budget first. Pure (no MessageCollector/Android
+ * dependency) so it's unit-testable on the JVM.
+ */
+internal fun buildNetworkCallMessage(
+    url: String,
+    method: String,
+    requestJSON: String,
+    responseJSON: String,
+    status: Int,
+    duration: ULong
+): ORMobileNetworkCall {
+    return ORMobileNetworkCall(
+        type = "request",
+        method = method,
+        URL = url,
+        request = NetworkPayloadLimiter.fit(requestJSON),
+        response = NetworkPayloadLimiter.fit(responseJSON),
+        status = status,
+        duration = duration
+    )
+}
+
+/**
+ * Chokepoint for network call reporting: the native [NetworkListener], the React
+ * Native bridge, and `OpenReplay.networkRequest` all funnel through here, so fitting
+ * the payloads here (rather than in [NetworkListener.finish]) guarantees every caller
+ * gets the same oversized-body protection.
+ */
 fun sendNetworkMessage(
     url: String,
     method: String,
@@ -173,15 +244,7 @@ fun sendNetworkMessage(
     status: Int,
     duration: ULong
 ) {
-    val message = ORMobileNetworkCall(
-        type = "request",
-        method = method,
-        URL = url,
-        request = requestJSON,
-        response = responseJSON,
-        status = status,
-        duration = duration
+    MessageCollector.sendMessage(
+        buildNetworkCallMessage(url, method, requestJSON, responseJSON, status, duration)
     )
-
-    MessageCollector.sendMessage(message)
 }

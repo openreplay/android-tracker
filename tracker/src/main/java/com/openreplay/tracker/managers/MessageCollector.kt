@@ -6,6 +6,7 @@ import com.openreplay.tracker.OpenReplay.getLateMessagesFile
 import com.openreplay.tracker.models.ORMessage
 import com.openreplay.tracker.models.script.ORMobileBatchMeta
 import com.openreplay.tracker.models.script.ORMobileGraphQL
+import com.openreplay.tracker.models.script.ORMobileLog
 import com.openreplay.tracker.models.script.ORMobileNetworkCall
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -14,6 +15,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
@@ -227,26 +229,38 @@ object MessageCollector {
             DebugUtils.log("MessageCollector is paused, message dropped")
             return
         }
-        
+
         // if (!message.isValid()) {
         //     DebugUtils.error("Attempted to send invalid message with type 0 or null: ${message::class.simpleName} (messageRaw=${message.messageRaw}, messageType=${message.message})")
         //     return
         // }
-        
+
         if (OpenReplay.bufferingMode) {
             ConditionsManager.processMessage(message)?.let { trigger ->
                 OpenReplay.triggerRecording(trigger)
             }
         }
-        
-        if (!message.toString().contains("Log") && !message.toString().contains("NetworkCall")) {
+
+        // Only build the (potentially large) toString() when it'll actually be logged.
+        if (OpenReplay.options.debugLogs && message !is ORMobileLog && message !is ORMobileNetworkCall) {
             DebugUtils.log(message.toString())
         }
         (message as? ORMobileNetworkCall)?.let { networkCallMessage ->
             DebugUtils.log("-->> MobileNetworkCall(105): ${networkCallMessage.method} ${networkCallMessage.URL}")
         }
 
-        sendRawMessage(data = message.contentData())
+        // Encode on the caller's thread (unchanged from before this fix) so message
+        // order into the executor queue is preserved; a message that fails
+        // contentData()'s size validation (e.g. an oversized string from the host
+        // app) is dropped here instead of escaping as a crash.
+        val data = try {
+            message.contentData()
+        } catch (e: Exception) {
+            DebugUtils.error("Dropping ${message::class.simpleName}: ${e.message}")
+            return
+        }
+
+        sendRawMessage(data, message::class.simpleName)
     }
 
     fun syncBuffers() {
@@ -272,27 +286,33 @@ object MessageCollector {
         }
     }
 
-    private fun sendRawMessage(data: ByteArray) {
-        executorService.execute {
-            if (data.size > maxMessagesSize) {
-                DebugUtils.log("<><><>Single message size exceeded limit")
-                return@execute
-            }
-            synchronized(messagesWaiting) {
-                messagesWaiting.add(data)
-            }
-            if (OpenReplay.bufferingMode) {
-                synchronized(messagesWaitingBackup) {
-                    messagesWaitingBackup.add(data)
+    private fun sendRawMessage(data: ByteArray, messageType: String? = null) {
+        try {
+            executorService.execute {
+                if (data.size > maxMessagesSize) {
+                    DebugUtils.log("<><><>Single message size exceeded limit: ${data.size} bytes ($messageType)")
+                    return@execute
+                }
+                synchronized(messagesWaiting) {
+                    messagesWaiting.add(data)
+                }
+                if (OpenReplay.bufferingMode) {
+                    synchronized(messagesWaitingBackup) {
+                        messagesWaitingBackup.add(data)
+                    }
+                }
+                var totalWaitingSize = 0
+                synchronized(messagesWaiting) {
+                    messagesWaiting.forEach { totalWaitingSize += it.size }
+                }
+                if (!OpenReplay.bufferingMode && totalWaitingSize > (maxMessagesSize * 0.8).toInt()) {
+                    flushMessages()
                 }
             }
-            var totalWaitingSize = 0
-            synchronized(messagesWaiting) {
-                messagesWaiting.forEach { totalWaitingSize += it.size }
-            }
-            if (!OpenReplay.bufferingMode && totalWaitingSize > (maxMessagesSize * 0.8).toInt()) {
-                flushMessages()
-            }
+        } catch (e: RejectedExecutionException) {
+            // Executor is mid shutdown/recreate (e.g. stop() racing with a send) - drop
+            // rather than letting the rejection escape to the caller.
+            DebugUtils.log("Dropping $messageType: executor rejected (size=${data.size})")
         }
     }
 
