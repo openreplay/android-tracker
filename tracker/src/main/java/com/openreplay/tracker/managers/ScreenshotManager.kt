@@ -32,6 +32,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream
@@ -81,6 +82,27 @@ object ScreenshotManager {
     // to 30s, so an unbounded per-pass dispatch would queue the whole backlog anyway.
     private const val MAX_ARCHIVES_IN_FLIGHT = 2
 
+    // At most one capture lives at a time; see CaptureGate for why.
+    private val captureGate = CaptureGate()
+
+    // A capture that has not finished by then is abandoned: its late callback finds
+    // the coroutine cancelled and recycles the bitmap.
+    private const val CAPTURE_TIMEOUT_MILLIS = 5_000L
+
+    private fun CoroutineScope.launchCaptureIfIdle(reason: String) {
+        if (!captureGate.tryAcquire()) {
+            DebugUtils.log("Screenshot skipped ($reason): previous capture still running")
+            return
+        }
+        launch {
+            try {
+                makeScreenshotAndSaveWithArchive()
+            } finally {
+                captureGate.release()
+            }
+        }
+    }
+
     fun setSettings(settings: Triple<Int, Int, Int>) {
         val (_, quality, resolution) = settings
         this.quality = quality
@@ -97,17 +119,20 @@ object ScreenshotManager {
             // Drop leftovers from a previous run that never got archived — they
             // carry pre-session timestamps and would pollute this session's replay.
             runCatching { getScreenshotFolder().listFiles()?.forEach { it.delete() } }
-            makeScreenshotAndSaveWithArchive()
+            launchCaptureIfIdle("first frame")
         }
     }
 
     fun retryFirstFrameCapture(startTs: Long) {
         if (!::uiContext.isInitialized) return
         firstTs = startTs.toString()
-        scope.launch { makeScreenshotAndSaveWithArchive() }
+        scope.launchCaptureIfIdle("first frame retry")
     }
 
     fun start(context: Context, startTs: Long) {
+        // A start without a stop in between (resume() while a loop still runs) used
+        // to add a second capture loop: the old job was only dereferenced.
+        screenShotJob?.cancel()
         uiContext = WeakReference(context)
         firstTs = startTs.toString()
         lastOrientation = -1
@@ -116,10 +141,10 @@ object ScreenshotManager {
 
         screenShotJob = scope.launch {
             checkAndReportOrientationChange()
-            launch { makeScreenshotAndSaveWithArchive() }
-            while (true) {
+            launchCaptureIfIdle("start")
+            while (isActive) {
                 delay(intervalMillis)
-                launch { makeScreenshotAndSaveWithArchive() }
+                launchCaptureIfIdle("tick")
                 launch { sendScreenshotArchives() }
             }
         }
@@ -207,7 +232,9 @@ object ScreenshotManager {
         coroutineScope {
             try {
                 checkAndReportOrientationChange()
-                val screenShotBitmap = withContext(Dispatchers.Main) { captureScreenshot() }
+                val screenShotBitmap = withTimeout(CAPTURE_TIMEOUT_MILLIS) {
+                    withContext(Dispatchers.Main) { captureScreenshot() }
+                }
                 val imageData = compress(screenShotBitmap)
                 val screenShotFolder = getScreenshotFolder()
                 // Claim the name only after capture+compress succeeded, so a failed
