@@ -43,6 +43,7 @@ import java.lang.ref.WeakReference
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.suspendCoroutine
 import kotlinx.coroutines.suspendCancellableCoroutine
 
@@ -81,6 +82,12 @@ object ScreenshotManager {
     // to 30s, so an unbounded per-pass dispatch would queue the whole backlog anyway.
     private const val MAX_ARCHIVES_IN_FLIGHT = 2
 
+    // A skipped capture (no Activity, activity finishing) is routine for a tick or two
+    // and only logged in debug builds. A long unbroken run means the replay is silently
+    // frozen, so it is reported once at error level, which logs in release builds too.
+    private const val SKIP_STREAK_ERROR_THRESHOLD = 10
+    private val consecutiveSkips = AtomicInteger(0)
+
     fun setSettings(settings: Triple<Int, Int, Int>) {
         val (_, quality, resolution) = settings
         this.quality = quality
@@ -108,9 +115,13 @@ object ScreenshotManager {
     }
 
     fun start(context: Context, startTs: Long) {
+        // A second start (e.g. resume() after a /start reply landed in the background)
+        // would otherwise orphan the running loop, which pause()/stop() could never cancel.
+        screenShotJob?.cancel()
         uiContext = WeakReference(context)
         firstTs = startTs.toString()
         lastOrientation = -1
+        consecutiveSkips.set(0)
         val intervalMillis =
             OpenReplay.options.screenshotFrequency.millis / OpenReplay.options.fps.toLong()
 
@@ -219,6 +230,7 @@ object ScreenshotManager {
                 }
                 val screenShotFile = File(screenShotFolder, "$frameTs.jpeg")
                 FileOutputStream(screenShotFile).use { out -> out.write(imageData) }
+                consecutiveSkips.set(0)
                 archiveMutex.withLock {
                     if (screenShotFolder.listFiles().orEmpty().size >= chunk) {
                         archivateFolder(folder = screenShotFolder)
@@ -226,6 +238,9 @@ object ScreenshotManager {
                 }
             } catch (e: IllegalStateException) {
                 DebugUtils.log("Screenshot skipped: ${e.message}")
+                if (consecutiveSkips.incrementAndGet() == SKIP_STREAK_ERROR_THRESHOLD) {
+                    DebugUtils.error("Screenshots skipped $SKIP_STREAK_ERROR_THRESHOLD times in a row (${e.message}); the replay gets no new frames until a capture succeeds")
+                }
             } catch (e: Exception) {
                 DebugUtils.error("Screenshot error: ${e.message}")
             }

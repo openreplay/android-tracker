@@ -82,6 +82,22 @@ object OpenReplay {
     // Session state management
     @Volatile
     private var isSessionStarted = false
+    // A /start request is in flight; the network callback and resume() must not send another.
+    @Volatile
+    private var isSessionStarting = false
+    // onStarted callbacks waiting for the next successful /start. Only the first trigger
+    // sends the request, and it may be resume()'s no-op, so later callers wait here
+    // instead of being dropped.
+    private val pendingOnStarted = mutableListOf<() -> Unit>() // guarded by sessionLock
+    // start()'s own callback in pendingOnStarted. start() queues it directly because
+    // resume() can finish /start before the network callback carrying it fires. A later
+    // start() replaces it, matching the network callback that start() also replaces.
+    private var startOnStarted: (() -> Unit)? = null // guarded by sessionLock
+    private val noOpOnStarted: () -> Unit = {}
+    // Bumped by stop(). A /start reply tagged with an older generation arrived after the
+    // tracker was torn down (lifecycle callbacks gone) and must not start anything.
+    @Volatile
+    private var sessionGeneration = 0
     private val sessionLock = Any()
 
 
@@ -99,6 +115,15 @@ object OpenReplay {
         // Initialize LifecycleManager immediately to capture current activity
         if (this.lifecycleManager == null) {
             this.lifecycleManager = LifecycleManager(appContext, context as? Activity)
+        }
+
+        synchronized(sessionLock) {
+            startOnStarted?.let { previous -> pendingOnStarted.removeAll { it === previous } }
+            startOnStarted = null
+            if (!isSessionStarted) {
+                pendingOnStarted.add(onStarted)
+                startOnStarted = onStarted
+            }
         }
 
         this.connectivityManager =
@@ -171,10 +196,25 @@ object OpenReplay {
                 }
                 return
             }
+            // Stopped (or never started). A network callback already running when stop()
+            // unregistered it can get here once stop() releases the lock; starting now would
+            // record with no LifecycleManager, so every screenshot would be skipped.
+            if (lifecycleManager == null) {
+                DebugUtils.log("Tracker is not started, not starting a session")
+                return
+            }
             
             val context = appContext
             if (context == null) {
                 DebugUtils.error("App context is null, cannot start session")
+                return
+            }
+            // The network callback passes the same lambda on every capabilities change.
+            if (pendingOnStarted.none { it === onStarted }) pendingOnStarted.add(onStarted)
+            if (isSessionStarting) {
+                if (options.debugLogs) {
+                    DebugUtils.log("Session start already in flight, waiting for it")
+                }
                 return
             }
             
@@ -191,37 +231,56 @@ object OpenReplay {
                 ScreenshotManager.captureFirstFrame(context, sessionStartTs)
             }
             val activityContext = lifecycleManager?.currentActivity
+            val generation = sessionGeneration
+            isSessionStarting = true
             SessionRequest.create(context, activityContext, false) { sessionResponse ->
-                if (sessionResponse == null) {
-                    DebugUtils.error("Openreplay: no response from /start request")
-                    return@create
-                }
+                val callbacks = synchronized(sessionLock) {
+                    if (isStaleStart(generation)) return@create
+                    isSessionStarting = false
 
-                MessageCollector.start(context)
+                    if (sessionResponse == null) {
+                        // Callbacks stay queued for the next attempt (next network change).
+                        DebugUtils.error("Openreplay: no response from /start request")
+                        return@create
+                    }
 
-                with(options) {
-                    if (screen) {
-                        ScreenshotManager.setSettings(
-                            settings = getCaptureSettings(
-                                fps = 1,
-                                quality = options.screenshotQuality
+                    MessageCollector.start(context)
+
+                    with(options) {
+                        if (screen) {
+                            ScreenshotManager.setSettings(
+                                settings = getCaptureSettings(
+                                    fps = 1,
+                                    quality = options.screenshotQuality
+                                )
                             )
-                        )
-                        ScreenshotManager.start(context, sessionStartTs)
+                            ScreenshotManager.start(context, sessionStartTs)
+                        }
+                        if (logs) LogsListener.start()
+                        if (crashes) {
+                            Crash.init(context)
+                            Crash.start()
+                        }
+                        if (performances) PerformanceListener.getInstance(context).start()
+                        if (analytics) Analytics.start()
                     }
-                    if (logs) LogsListener.start()
-                    if (crashes) {
-                        Crash.init(context)
-                        Crash.start()
-                    }
-                    if (performances) PerformanceListener.getInstance(context).start()
-                    if (analytics) Analytics.start()
+
+                    isSessionStarted = true
+                    startOnStarted = null
+                    pendingOnStarted.toList().also { pendingOnStarted.clear() }
                 }
-                
-                isSessionStarted = true
-                onStarted()
+                callbacks.forEach { it() }
             }
         }
+    }
+
+    // stop() ran while the /start request for [generation] was in flight. Starting the
+    // subsystems now would revive a session whose LifecycleManager is already gone, so
+    // every screenshot tick would be skipped for the rest of the process.
+    private fun isStaleStart(generation: Int): Boolean {
+        if (generation == sessionGeneration) return false
+        DebugUtils.warn("Ignoring /start response: stop() was called while it was in flight")
+        return true
     }
 
     fun getLateMessagesFile(context: Context): File {
@@ -265,33 +324,48 @@ object OpenReplay {
         }
         
         val activityContext = lifecycleManager?.currentActivity
+        // In flight, then started, like startSession(): otherwise the first resume()
+        // (onActivityStarted) sees no session and calls startSession(), which sends a
+        // second /start or starts normal ingestion while still in buffering mode.
+        val generation = synchronized(sessionLock) {
+            isSessionStarting = true
+            sessionGeneration
+        }
         SessionRequest.create(context, activityContext, false) { sessionResponse ->
-            if (sessionResponse == null) {
-                DebugUtils.error("Openreplay: no response from /start request")
-                return@create
-            }
-            ConditionsManager.getConditions()
-            MessageCollector.cycleBuffer()
-            onStarted()
+            val callbacks = synchronized(sessionLock) {
+                if (isStaleStart(generation)) return@create
+                isSessionStarting = false
+                if (sessionResponse == null) {
+                    DebugUtils.error("Openreplay: no response from /start request")
+                    return@create
+                }
+                ConditionsManager.getConditions()
+                MessageCollector.cycleBuffer()
 
-            with(this.options) {
-                if (screen) {
-                    ScreenshotManager.setSettings(
-                        settings = getCaptureSettings(
-                            fps = 1,
-                            quality = OpenReplay.options.screenshotQuality
+                with(this.options) {
+                    if (screen) {
+                        ScreenshotManager.setSettings(
+                            settings = getCaptureSettings(
+                                fps = 1,
+                                quality = OpenReplay.options.screenshotQuality
+                            )
                         )
-                    )
-                    ScreenshotManager.start(context, sessionStartTs)
+                        ScreenshotManager.start(context, sessionStartTs)
+                    }
+                    if (logs) LogsListener.start()
+                    if (crashes) {
+                        Crash.init(context)
+                        Crash.start()
+                    }
+                    if (performances) PerformanceListener.getInstance(context).start()
+                    if (analytics) Analytics.start()
                 }
-                if (logs) LogsListener.start()
-                if (crashes) {
-                    Crash.init(context)
-                    Crash.start()
-                }
-                if (performances) PerformanceListener.getInstance(context).start()
-                if (analytics) Analytics.start()
+
+                isSessionStarted = true
+                pendingOnStarted.toList().also { pendingOnStarted.clear() }
             }
+            onStarted()
+            callbacks.forEach { it() }
         }
     }
 
@@ -308,7 +382,11 @@ object OpenReplay {
         }
         
         val activityContext = lifecycleManager?.currentActivity
+        val generation = sessionGeneration
         SessionRequest.create(context = context, activityContext = activityContext, doNotRecord = false) { sessionResponse ->
+            // No sessionLock here: this can run synchronously on a MessageCollector
+            // executor thread, which stop() waits on while holding the lock.
+            if (isStaleStart(generation)) return@create
             if (sessionResponse != null) {
                 MessageCollector.syncBuffers()
                 MessageCollector.start(context)
@@ -384,7 +462,7 @@ object OpenReplay {
                 if (options.debugLogs) {
                     DebugUtils.log("Session not started, starting new session")
                 }
-                startSession(onStarted = {})
+                startSession(onStarted = noOpOnStarted)
                 return
             }
             
@@ -482,8 +560,12 @@ object OpenReplay {
             
             connectivityManager = null
             
-            // Reset session state
+            // Reset session state; invalidate any /start still in flight
             isSessionStarted = false
+            isSessionStarting = false
+            pendingOnStarted.clear()
+            startOnStarted = null
+            sessionGeneration++
         }
     }
 
