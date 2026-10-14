@@ -22,6 +22,12 @@ object SessionRequest {
     private val cachedSessionResponse = AtomicReference<SessionResponse?>()
     private val retryCount = AtomicInteger(0)
     private var retryHandler: Handler? = null
+
+    // Bumped by clear() (OpenReplay.stop()). A reply to a request sent before the bump
+    // belongs to a session that was already closed: it must not be cached, adopted by
+    // NetworkManager, or retried, or the next start() would reuse or post to it.
+    private var generation = 0
+    private val generationLock = Any()
     
     private const val RETRY_DELAY_MS = 5000L
     private const val MAX_RETRIES = 5
@@ -42,7 +48,7 @@ object SessionRequest {
 
         try {
             initializeParams(context, activityContext, doNotRecord, projectKey)
-            callAPI(completion)
+            callAPI(synchronized(generationLock) { generation }, completion)
         } catch (e: Exception) {
             DebugUtils.error("Error creating session", e)
             completion(null)
@@ -50,8 +56,11 @@ object SessionRequest {
     }
 
     fun clear() {
-        sessionId.set(null)
-        cachedSessionResponse.set(null)
+        synchronized(generationLock) {
+            generation++
+            sessionId.set(null)
+            cachedSessionResponse.set(null)
+        }
         retryCount.set(0)
         synchronized(params) {
             params.clear()
@@ -125,29 +134,39 @@ object SessionRequest {
         return context.resources.configuration.smallestScreenWidthDp >= 600
     }
 
-    private fun callAPI(completion: (SessionResponse?) -> Unit) {
-        val paramsCopy = synchronized(params) {
-            if (params.isEmpty()) {
-                DebugUtils.error("Params are empty, cannot call API")
-                completion(null)
-                return
-            }
-            params.toMap()
+    private fun callAPI(requestGeneration: Int, completion: (SessionResponse?) -> Unit) {
+        // Report outside the params lock: completions take OpenReplay's sessionLock, and
+        // stop() takes sessionLock then params (via clear()), so nesting them deadlocks.
+        val paramsCopy = synchronized(params) { params.toMap() }
+        if (paramsCopy.isEmpty()) {
+            DebugUtils.error("Params are empty, cannot call API")
+            completion(null)
+            return
         }
 
         NetworkManager.createSession(paramsCopy) { sessionResponse ->
+            // Check and adopt under the lock so a concurrent clear() can't land in between.
+            val adopted = synchronized(generationLock) {
+                if (requestGeneration != generation) {
+                    DebugUtils.log("Dropping /start reply: session was cleared while it was in flight")
+                    return@createSession
+                }
+                sessionResponse?.also {
+                    NetworkManager.applySession(it)
+                    sessionId.set(it.sessionID)
+                    cachedSessionResponse.set(it)
+                }
+            }
             when {
-                sessionResponse != null -> {
-                    sessionId.set(sessionResponse.sessionID)
-                    cachedSessionResponse.set(sessionResponse)
+                adopted != null -> {
                     retryCount.set(0)
                     
                     synchronized(params) {
                         params.clear()
                     }
                     
-                    DebugUtils.log("Session created: ${sessionResponse.sessionID}")
-                    completion(sessionResponse)
+                    DebugUtils.log("Session created: ${adopted.sessionID}")
+                    completion(adopted)
                 }
                 retryCount.incrementAndGet() <= MAX_RETRIES -> {
                     val currentRetry = retryCount.get()
@@ -159,7 +178,7 @@ object SessionRequest {
                     
                     retryHandler?.postDelayed({
                         refreshTimestampIfNoFirstFrame()
-                        callAPI(completion)
+                        callAPI(requestGeneration, completion)
                     }, RETRY_DELAY_MS)
                 }
                 else -> {

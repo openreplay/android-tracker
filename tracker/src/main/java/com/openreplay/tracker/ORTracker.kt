@@ -82,6 +82,13 @@ object OpenReplay {
     // Session state management
     @Volatile
     private var isSessionStarted = false
+    // A /start request is in flight; repeated network callbacks must not send another.
+    @Volatile
+    private var isSessionStarting = false
+    // Bumped by stop(). A /start reply tagged with an older generation arrived after the
+    // tracker was torn down (lifecycle callbacks gone) and must not start anything.
+    @Volatile
+    private var sessionGeneration = 0
     private val sessionLock = Any()
 
 
@@ -165,7 +172,7 @@ object OpenReplay {
 
     fun startSession(onStarted: () -> Unit) {
         synchronized(sessionLock) {
-            if (isSessionStarted) {
+            if (isSessionStarted || isSessionStarting) {
                 if (options.debugLogs) {
                     DebugUtils.log("Session already started, skipping duplicate start")
                 }
@@ -191,37 +198,53 @@ object OpenReplay {
                 ScreenshotManager.captureFirstFrame(context, sessionStartTs)
             }
             val activityContext = lifecycleManager?.currentActivity
+            val generation = sessionGeneration
+            isSessionStarting = true
             SessionRequest.create(context, activityContext, false) { sessionResponse ->
-                if (sessionResponse == null) {
-                    DebugUtils.error("Openreplay: no response from /start request")
-                    return@create
-                }
+                synchronized(sessionLock) {
+                    if (isStaleStart(generation)) return@create
+                    isSessionStarting = false
 
-                MessageCollector.start(context)
+                    if (sessionResponse == null) {
+                        DebugUtils.error("Openreplay: no response from /start request")
+                        return@create
+                    }
 
-                with(options) {
-                    if (screen) {
-                        ScreenshotManager.setSettings(
-                            settings = getCaptureSettings(
-                                fps = 1,
-                                quality = options.screenshotQuality
+                    MessageCollector.start(context)
+
+                    with(options) {
+                        if (screen) {
+                            ScreenshotManager.setSettings(
+                                settings = getCaptureSettings(
+                                    fps = 1,
+                                    quality = options.screenshotQuality
+                                )
                             )
-                        )
-                        ScreenshotManager.start(context, sessionStartTs)
+                            ScreenshotManager.start(context, sessionStartTs)
+                        }
+                        if (logs) LogsListener.start()
+                        if (crashes) {
+                            Crash.init(context)
+                            Crash.start()
+                        }
+                        if (performances) PerformanceListener.getInstance(context).start()
+                        if (analytics) Analytics.start()
                     }
-                    if (logs) LogsListener.start()
-                    if (crashes) {
-                        Crash.init(context)
-                        Crash.start()
-                    }
-                    if (performances) PerformanceListener.getInstance(context).start()
-                    if (analytics) Analytics.start()
+
+                    isSessionStarted = true
                 }
-                
-                isSessionStarted = true
                 onStarted()
             }
         }
+    }
+
+    // stop() ran while the /start request for [generation] was in flight. Starting the
+    // subsystems now would revive a session whose LifecycleManager is already gone, so
+    // every screenshot tick would be skipped for the rest of the process.
+    private fun isStaleStart(generation: Int): Boolean {
+        if (generation == sessionGeneration) return false
+        DebugUtils.warn("Ignoring /start response: stop() was called while it was in flight")
+        return true
     }
 
     fun getLateMessagesFile(context: Context): File {
@@ -265,33 +288,37 @@ object OpenReplay {
         }
         
         val activityContext = lifecycleManager?.currentActivity
+        val generation = sessionGeneration
         SessionRequest.create(context, activityContext, false) { sessionResponse ->
-            if (sessionResponse == null) {
-                DebugUtils.error("Openreplay: no response from /start request")
-                return@create
-            }
-            ConditionsManager.getConditions()
-            MessageCollector.cycleBuffer()
-            onStarted()
+            synchronized(sessionLock) {
+                if (isStaleStart(generation)) return@create
+                if (sessionResponse == null) {
+                    DebugUtils.error("Openreplay: no response from /start request")
+                    return@create
+                }
+                ConditionsManager.getConditions()
+                MessageCollector.cycleBuffer()
 
-            with(this.options) {
-                if (screen) {
-                    ScreenshotManager.setSettings(
-                        settings = getCaptureSettings(
-                            fps = 1,
-                            quality = OpenReplay.options.screenshotQuality
+                with(this.options) {
+                    if (screen) {
+                        ScreenshotManager.setSettings(
+                            settings = getCaptureSettings(
+                                fps = 1,
+                                quality = OpenReplay.options.screenshotQuality
+                            )
                         )
-                    )
-                    ScreenshotManager.start(context, sessionStartTs)
+                        ScreenshotManager.start(context, sessionStartTs)
+                    }
+                    if (logs) LogsListener.start()
+                    if (crashes) {
+                        Crash.init(context)
+                        Crash.start()
+                    }
+                    if (performances) PerformanceListener.getInstance(context).start()
+                    if (analytics) Analytics.start()
                 }
-                if (logs) LogsListener.start()
-                if (crashes) {
-                    Crash.init(context)
-                    Crash.start()
-                }
-                if (performances) PerformanceListener.getInstance(context).start()
-                if (analytics) Analytics.start()
             }
+            onStarted()
         }
     }
 
@@ -308,7 +335,11 @@ object OpenReplay {
         }
         
         val activityContext = lifecycleManager?.currentActivity
+        val generation = sessionGeneration
         SessionRequest.create(context = context, activityContext = activityContext, doNotRecord = false) { sessionResponse ->
+            // No sessionLock here: this can run synchronously on a MessageCollector
+            // executor thread, which stop() waits on while holding the lock.
+            if (isStaleStart(generation)) return@create
             if (sessionResponse != null) {
                 MessageCollector.syncBuffers()
                 MessageCollector.start(context)
@@ -482,8 +513,10 @@ object OpenReplay {
             
             connectivityManager = null
             
-            // Reset session state
+            // Reset session state; invalidate any /start still in flight
             isSessionStarted = false
+            isSessionStarting = false
+            sessionGeneration++
         }
     }
 

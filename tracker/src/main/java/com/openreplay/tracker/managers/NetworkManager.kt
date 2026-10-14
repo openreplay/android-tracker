@@ -200,15 +200,8 @@ object NetworkManager {
 
                 if (body.isNotEmpty()) {
                     val sessionResponse = Gson().fromJson(body, SessionResponse::class.java)
-                    token = sessionResponse.token
-                    sessionId = sessionResponse.sessionID
-                    projectId = sessionResponse.projectID
-                    framesSupport = sessionResponse.framesSupport ?: false
-
-                    // Save token for late messages
-                    token?.let { UserDefaults.lastToken = it }
-
-                    DebugUtils.log("Session created successfully: $sessionId")
+                    // Not adopted here: the caller decides via applySession(), since a
+                    // reply that lands after OpenReplay.stop() must not become the live session.
                     withContext(Dispatchers.Main) { completion(sessionResponse) }
                 } else {
                     DebugUtils.error("Empty response body for createSession")
@@ -221,6 +214,20 @@ object NetworkManager {
                 request?.disconnect()
             }
         }
+    }
+
+    // Make a /start reply the live session: its token authorizes every later upload.
+    fun applySession(sessionResponse: SessionResponse) {
+        token = sessionResponse.token
+        sessionId = sessionResponse.sessionID
+        projectId = sessionResponse.projectID
+        framesSupport = sessionResponse.framesSupport ?: false
+
+        // Save token for late messages. commit() writes to disk and this runs on the
+        // main thread, so persist it from the network scope.
+        token?.let { networkScope.launch { UserDefaults.lastToken = it } }
+
+        DebugUtils.log("Session created successfully: $sessionId")
     }
 
     fun sendMessage(content: ByteArray, completion: (Boolean) -> Unit) {
