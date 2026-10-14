@@ -324,10 +324,17 @@ object OpenReplay {
         }
         
         val activityContext = lifecycleManager?.currentActivity
-        val generation = sessionGeneration
+        // In flight, then started, like startSession(): otherwise the first resume()
+        // (onActivityStarted) sees no session and calls startSession(), which sends a
+        // second /start or starts normal ingestion while still in buffering mode.
+        val generation = synchronized(sessionLock) {
+            isSessionStarting = true
+            sessionGeneration
+        }
         SessionRequest.create(context, activityContext, false) { sessionResponse ->
-            synchronized(sessionLock) {
+            val callbacks = synchronized(sessionLock) {
                 if (isStaleStart(generation)) return@create
+                isSessionStarting = false
                 if (sessionResponse == null) {
                     DebugUtils.error("Openreplay: no response from /start request")
                     return@create
@@ -353,8 +360,12 @@ object OpenReplay {
                     if (performances) PerformanceListener.getInstance(context).start()
                     if (analytics) Analytics.start()
                 }
+
+                isSessionStarted = true
+                pendingOnStarted.toList().also { pendingOnStarted.clear() }
             }
             onStarted()
+            callbacks.forEach { it() }
         }
     }
 

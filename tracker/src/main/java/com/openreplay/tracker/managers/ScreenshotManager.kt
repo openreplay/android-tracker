@@ -115,6 +115,9 @@ object ScreenshotManager {
     }
 
     fun start(context: Context, startTs: Long) {
+        // A second start (e.g. resume() after a /start reply landed in the background)
+        // would otherwise orphan the running loop, which pause()/stop() could never cancel.
+        screenShotJob?.cancel()
         uiContext = WeakReference(context)
         firstTs = startTs.toString()
         lastOrientation = -1

@@ -163,56 +163,66 @@ object NetworkManager {
 
     fun createSession(params: Map<String, Any>, completion: (SessionResponse?) -> Unit) {
         networkScope.launch {
-            if (writeToFile) {
-                token = "writeToFile"
-                withContext(Dispatchers.Main) { completion(null) }
-                return@launch
+            val sessionResponse = requestSession(params)
+            // Called once, outside requestSession()'s try: an exception thrown by the
+            // completion (a subsystem start, a host onStarted) is not a failed request.
+            // Reporting it as one made SessionRequest retry and create a second session.
+            withContext(Dispatchers.Main) {
+                try {
+                    completion(sessionResponse)
+                } catch (e: Exception) {
+                    DebugUtils.error("Error handling /start response", e)
+                }
+            }
+        }
+    }
+
+    private suspend fun requestSession(params: Map<String, Any>): SessionResponse? {
+        if (writeToFile) {
+            token = "writeToFile"
+            return null
+        }
+
+        if (!isNetworkAvailable()) {
+            DebugUtils.error("No network connection available for createSession")
+            return null
+        }
+
+        val json = Gson().toJson(params).toByteArray()
+        var request: HttpURLConnection? = null
+
+        return try {
+            request = createRequest(
+                "POST",
+                START_URL,
+                body = json,
+                headers = mapOf("Content-Type" to "application/json; charset=utf-8")
+            )
+
+            val responseCode = request.responseCode
+            if (responseCode !in 200..299) {
+                val errorBody = readErrorStream(request)
+                DebugUtils.error("createSession failed with code $responseCode: $errorBody")
+                return null
             }
 
-            if (!isNetworkAvailable()) {
-                DebugUtils.error("No network connection available for createSession")
-                withContext(Dispatchers.Main) { completion(null) }
-                return@launch
+            val body = request.inputStream.use { inputStream ->
+                inputStream.bufferedReader().readText()
             }
 
-            val json = Gson().toJson(params).toByteArray()
-            var request: HttpURLConnection? = null
-
-            try {
-                request = createRequest(
-                    "POST",
-                    START_URL,
-                    body = json,
-                    headers = mapOf("Content-Type" to "application/json; charset=utf-8")
-                )
-
-                val responseCode = request.responseCode
-                if (responseCode !in 200..299) {
-                    val errorBody = readErrorStream(request)
-                    DebugUtils.error("createSession failed with code $responseCode: $errorBody")
-                    withContext(Dispatchers.Main) { completion(null) }
-                    return@launch
-                }
-
-                val body = request.inputStream.use { inputStream ->
-                    inputStream.bufferedReader().readText()
-                }
-
-                if (body.isNotEmpty()) {
-                    val sessionResponse = Gson().fromJson(body, SessionResponse::class.java)
-                    // Not adopted here: the caller decides via applySession(), since a
-                    // reply that lands after OpenReplay.stop() must not become the live session.
-                    withContext(Dispatchers.Main) { completion(sessionResponse) }
-                } else {
-                    DebugUtils.error("Empty response body for createSession")
-                    withContext(Dispatchers.Main) { completion(null) }
-                }
-            } catch (e: Exception) {
-                DebugUtils.error("Error in createSession: ${e.message}")
-                withContext(Dispatchers.Main) { completion(null) }
-            } finally {
-                request?.disconnect()
+            if (body.isNotEmpty()) {
+                // Not adopted here: the caller decides via applySession(), since a
+                // reply that lands after OpenReplay.stop() must not become the live session.
+                Gson().fromJson(body, SessionResponse::class.java)
+            } else {
+                DebugUtils.error("Empty response body for createSession")
+                null
             }
+        } catch (e: Exception) {
+            DebugUtils.error("Error in createSession: ${e.message}")
+            null
+        } finally {
+            request?.disconnect()
         }
     }
 
