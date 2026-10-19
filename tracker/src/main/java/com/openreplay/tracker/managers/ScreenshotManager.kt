@@ -712,10 +712,20 @@ object ScreenshotManager {
                 )
             } catch (e: Exception) {
                 // Typically "Window doesn't have a backing surface!" — the window has no
-                // surface yet on the first capture after returning from background.
-                DebugUtils.log("PixelCopy request failed: ${e.message}")
+                // backing surface at capture time. Under the React Native New Architecture
+                // (Fabric/bridgeless) this happens for most frames because the UI renders to
+                // a child surface rather than the Activity window, so PixelCopy throws
+                // synchronously. The async non-SUCCESS branch above already falls back to
+                // oldViewToBitmap (Canvas draw, which needs no window surface); do the same
+                // here so these frames are captured instead of dropped.
+                DebugUtils.log("PixelCopy request failed: ${e.message}, falling back to oldViewToBitmap")
                 bitmap.recycle()
-                once(Result.failure(e))
+                try {
+                    once(Result.success(oldViewToBitmap(view)))
+                } catch (fallbackError: Exception) {
+                    DebugUtils.error("Fallback screenshot failed: ${fallbackError.message}")
+                    once(Result.failure(fallbackError))
+                }
             }
         } else {
             try {
