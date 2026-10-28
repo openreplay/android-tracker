@@ -14,6 +14,8 @@ import android.os.Handler
 import android.view.PixelCopy
 import android.view.View
 import android.view.ViewGroup
+import android.view.Window
+import android.view.WindowManager
 import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import com.openreplay.tracker.OpenReplay
@@ -87,6 +89,18 @@ object ScreenshotManager {
     // frozen, so it is reported once at error level, which logs in release builds too.
     private const val SKIP_STREAK_ERROR_THRESHOLD = 10
     private val consecutiveSkips = AtomicInteger(0)
+
+    // PixelCopy throws synchronously when the window has no backing surface. Usually that
+    // is one frame after returning from background, but it has been reported to hold for
+    // every frame (RN New Architecture). A window that fails this many requests in a row
+    // is drawn with Canvas directly, skipping the display-size bitmap PixelCopy needs, and
+    // PixelCopy is retried every PIXEL_COPY_REPROBE_FRAMES frames in case it recovers.
+    // Only touched on the main thread, from screenShot() and its PixelCopy callback.
+    private const val PIXEL_COPY_FAILURES_BEFORE_CANVAS = 3
+    private const val PIXEL_COPY_REPROBE_FRAMES = 30
+    private var pixelCopyWindow: WeakReference<Window>? = null
+    private var pixelCopyFailures = 0
+    private var framesSincePixelCopyProbe = 0
 
     fun setSettings(settings: Triple<Int, Int, Int>) {
         val (_, quality, resolution) = settings
@@ -371,8 +385,8 @@ object ScreenshotManager {
 
         // suspendCancellableCoroutine, and screenShot() reports every outcome: a capture
         // that silently dropped its callback (PixelCopy on a window with no backing
-        // surface, which happens on every return from background) used to suspend this
-        // coroutine forever, uncancellably.
+        // surface, as on the first capture after returning from background) used to
+        // suspend this coroutine forever, uncancellably.
         return suspendCancellableCoroutine { coroutine ->
             try {
                 activity.screenShot { outcome ->
@@ -638,6 +652,7 @@ object ScreenshotManager {
     /**
      * Captures the window and hands back exactly one [Result] on every path — including
      * the failure paths. A caller suspended on this callback must always be resumed.
+     * Runs on the main thread (makeScreenshotAndSaveWithArchive switches to it).
      */
     private fun Activity.screenShot(result: (Result<Bitmap>) -> Unit) {
         val activity = this
@@ -663,67 +678,94 @@ object ScreenshotManager {
             fail("Invalid view for screenshot")
             return
         }
+        val captureWindow = activity.window
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val displayMetrics = resources.displayMetrics
-            val bitmap = Bitmap.createBitmap(
-                displayMetrics.widthPixels,
-                displayMetrics.heightPixels,
-                Bitmap.Config.ARGB_8888
-            )
-
-            if (mainHandler == null) {
-                mainHandler = Handler(mainLooper)
+        // Software draw of the view tree on the main thread. view.draw() renders content
+        // the app marked FLAG_SECURE, so those windows are skipped instead.
+        fun captureWithCanvas() {
+            if ((captureWindow.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE) != 0) {
+                fail("Window is FLAG_SECURE, skipping Canvas capture")
+                return
             }
-            
-            try {
-                PixelCopy.request(
-                    activity.window,
-                    bitmap, { copyResult ->
-                        if (activity.isFinishing || activity.isDestroyed) {
-                            bitmap.recycle()
-                            fail("Activity is finishing or destroyed")
-                            return@request
-                        }
-
-                        when (copyResult) {
-                            PixelCopy.SUCCESS -> {
-                                try {
-                                    val maskedBitmap = applyMaskToScreenshot(bitmap, view)
-                                    once(Result.success(maskedBitmap))
-                                } catch (e: Exception) {
-                                    DebugUtils.error("Failed to apply mask: ${e.message}")
-                                    once(Result.success(bitmap))
-                                }
-                            }
-                            else -> {
-                                DebugUtils.error("PixelCopy failed with result: $copyResult, falling back to oldViewToBitmap")
-                                bitmap.recycle()
-                                try {
-                                    once(Result.success(oldViewToBitmap(view)))
-                                } catch (e: Exception) {
-                                    DebugUtils.error("Fallback screenshot failed: ${e.message}")
-                                    once(Result.failure(e))
-                                }
-                            }
-                        }
-                    },
-                    mainHandler!!
-                )
-            } catch (e: Exception) {
-                // Typically "Window doesn't have a backing surface!" — the window has no
-                // surface yet on the first capture after returning from background.
-                DebugUtils.log("PixelCopy request failed: ${e.message}")
-                bitmap.recycle()
-                once(Result.failure(e))
-            }
-        } else {
             try {
                 once(Result.success(oldViewToBitmap(view)))
             } catch (e: Exception) {
-                DebugUtils.error("Screenshot failed: ${e.message}")
+                DebugUtils.error("Canvas screenshot failed: ${e.message}")
                 once(Result.failure(e))
             }
+        }
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            captureWithCanvas()
+            return
+        }
+
+        if (pixelCopyWindow?.get() !== captureWindow) {
+            pixelCopyWindow = WeakReference(captureWindow)
+            pixelCopyFailures = 0
+            framesSincePixelCopyProbe = 0
+        }
+        if (pixelCopyFailures >= PIXEL_COPY_FAILURES_BEFORE_CANVAS &&
+            ++framesSincePixelCopyProbe < PIXEL_COPY_REPROBE_FRAMES
+        ) {
+            captureWithCanvas()
+            return
+        }
+        framesSincePixelCopyProbe = 0
+
+        // Local copy: stop() nulls mainHandler from another thread.
+        val handler = mainHandler ?: Handler(mainLooper).also { mainHandler = it }
+        val displayMetrics = resources.displayMetrics
+        val bitmap = Bitmap.createBitmap(
+            displayMetrics.widthPixels,
+            displayMetrics.heightPixels,
+            Bitmap.Config.ARGB_8888
+        )
+
+        try {
+            PixelCopy.request(
+                captureWindow,
+                bitmap, { copyResult ->
+                    if (activity.isFinishing || activity.isDestroyed) {
+                        bitmap.recycle()
+                        fail("Activity is finishing or destroyed")
+                        return@request
+                    }
+
+                    when (copyResult) {
+                        PixelCopy.SUCCESS -> {
+                            pixelCopyFailures = 0
+                            try {
+                                val maskedBitmap = applyMaskToScreenshot(bitmap, view)
+                                once(Result.success(maskedBitmap))
+                            } catch (e: Exception) {
+                                DebugUtils.error("Failed to apply mask: ${e.message}")
+                                once(Result.success(bitmap))
+                            }
+                        }
+                        else -> {
+                            DebugUtils.error("PixelCopy failed with result: $copyResult, falling back to Canvas capture")
+                            bitmap.recycle()
+                            captureWithCanvas()
+                        }
+                    }
+                },
+                handler
+            )
+        } catch (e: IllegalArgumentException) {
+            // "Window doesn't have a backing surface!", thrown before any copy is queued.
+            bitmap.recycle()
+            pixelCopyFailures++
+            if (pixelCopyFailures == PIXEL_COPY_FAILURES_BEFORE_CANVAS) {
+                DebugUtils.error("PixelCopy failed $PIXEL_COPY_FAILURES_BEFORE_CANVAS times in a row (${e.message}); capturing this window with a Canvas draw on the main thread")
+            } else {
+                DebugUtils.log("PixelCopy request failed: ${e.message}, falling back to Canvas capture")
+            }
+            captureWithCanvas()
+        } catch (e: Exception) {
+            DebugUtils.error("PixelCopy request failed: ${e.message}")
+            bitmap.recycle()
+            once(Result.failure(e))
         }
     }
 
